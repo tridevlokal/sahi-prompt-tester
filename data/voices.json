@@ -1,0 +1,54 @@
+{
+  "voices": [
+    {
+      "id": "b42ac02bb4d6",
+      "name": "Riya English PAywall",
+      "voice_id": "vGtqOwQ6rqrfUPTqvAGX",
+      "language": "english",
+      "tags": [],
+      "notes": "Auto-seeded from .env on first run",
+      "created_at": "2026-05-08T15:15:56",
+      "updated_at": "2026-05-08T15:23:20"
+    },
+    {
+      "id": "ced457979474",
+      "name": "Riya Tamil",
+      "voice_id": "RDWdsTU6N02BFftbIEAp",
+      "language": "tamil",
+      "tags": [],
+      "notes": "Auto-seeded from .env on first run",
+      "created_at": "2026-05-08T15:15:56",
+      "updated_at": "2026-05-18T15:58:19"
+    },
+    {
+      "id": "7b0b8bdcee62",
+      "name": "Riya Telugu",
+      "voice_id": "PLACEHOLDER_TELUGU_VOICE_ID",
+      "language": "telugu",
+      "tags": [],
+      "notes": "Auto-seeded from .env on first run",
+      "created_at": "2026-05-08T15:15:56",
+      "updated_at": "2026-05-08T15:15:56"
+    },
+    {
+      "id": "52e92ab72113",
+      "name": "Riya Kannada",
+      "voice_id": "PLACEHOLDER_KANNADA_VOICE_ID",
+      "language": "kannada",
+      "tags": [],
+      "notes": "Auto-seeded from .env on first run",
+      "created_at": "2026-05-08T15:15:56",
+      "updated_at": "2026-05-08T15:15:56"
+    },
+    {
+      "id": "ce821ccafc38",
+      "name": "tara - sahi eng",
+      "voice_id": "RDWdsTU6N02BFftbIEAp",
+      "language": "",
+      "tags": [],
+      "notes": "",
+      "created_at": "2026-07-16T18:34:52",
+      "updated_at": "2026-07-16T18:34:52"
+    }
+  ]
+}

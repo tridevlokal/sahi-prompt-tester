@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AI Riya — Admin</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #3b82f6;
+      --accent-hover: #2563eb;
+      --danger: #ef4444;
+      --success: #10b981;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+    }
+    header {
+      padding: 1rem 2rem;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    header h1 { margin: 0; font-size: 1.15rem; font-weight: 600; }
+    header a { color: var(--accent); text-decoration: none; font-size: 0.9rem; }
+    header a:hover { color: var(--accent-hover); }
+    main {
+      max-width: 1200px;
+      margin: 2rem auto;
+      padding: 0 2rem;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 2rem;
+    }
+    @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+    section {
+      background: var(--card);
+      border-radius: 8px;
+      padding: 1.5rem;
+    }
+    section h2 { margin: 0 0 1rem; font-size: 1.05rem; }
+    .item {
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.75rem 1rem;
+      margin-bottom: 0.5rem;
+      transition: border-color 0.15s;
+    }
+    .item:hover { border-color: var(--accent); }
+    .item-header {
+      display: flex;
+      justify-content: space-between;
+      gap: 0.5rem;
+      align-items: flex-start;
+    }
+    .item-name { font-weight: 600; word-break: break-word; }
+    .item-meta { font-size: 0.78rem; color: var(--muted); margin-top: 0.2rem; }
+    .item-body {
+      font-size: 0.85rem;
+      margin-top: 0.5rem;
+      color: var(--muted);
+      white-space: pre-wrap;
+      max-height: 6rem;
+      overflow: auto;
+      font-family: ui-monospace, SFMono-Regular, monospace;
+    }
+    .tags { display: flex; gap: 0.25rem; flex-wrap: wrap; margin-top: 0.4rem; }
+    .tag {
+      background: var(--border);
+      padding: 0.1rem 0.5rem;
+      border-radius: 999px;
+      font-size: 0.72rem;
+    }
+    .actions { display: flex; gap: 0.25rem; flex-shrink: 0; }
+    button {
+      background: var(--accent);
+      color: white;
+      border: none;
+      padding: 0.4rem 0.8rem;
+      border-radius: 4px;
+      font-size: 0.82rem;
+      cursor: pointer;
+      transition: background 0.15s, opacity 0.15s;
+    }
+    button:hover { background: var(--accent-hover); }
+    button.secondary { background: var(--border); color: var(--text); }
+    button.secondary:hover { background: #475569; }
+    button.danger { background: var(--danger); }
+    button.danger:hover { background: #dc2626; }
+    form { display: grid; gap: 0.75rem; margin-top: 0.5rem; }
+    label {
+      display: grid;
+      gap: 0.25rem;
+      font-size: 0.82rem;
+      color: var(--muted);
+    }
+    input, textarea {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 0.5rem;
+      border-radius: 4px;
+      font: inherit;
+      font-size: 0.9rem;
+      transition: border-color 0.15s;
+    }
+    input:focus, textarea:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+    textarea {
+      resize: vertical;
+      min-height: 100px;
+      font-family: ui-monospace, SFMono-Regular, monospace;
+    }
+    details {
+      margin-top: 1rem;
+      padding: 0.75rem;
+      border: 1px dashed var(--border);
+      border-radius: 6px;
+    }
+    details[open] { padding-bottom: 1rem; }
+    summary {
+      cursor: pointer;
+      color: var(--accent);
+      font-size: 0.9rem;
+      user-select: none;
+    }
+    summary:hover { color: var(--accent-hover); }
+    .empty {
+      color: var(--muted);
+      font-style: italic;
+      padding: 1rem;
+      text-align: center;
+      font-size: 0.9rem;
+    }
+    .toast {
+      position: fixed;
+      bottom: 1rem;
+      right: 1rem;
+      background: var(--card);
+      border: 1px solid var(--success);
+      color: var(--text);
+      padding: 0.6rem 1rem;
+      border-radius: 6px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s;
+      font-size: 0.9rem;
+      max-width: 320px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    }
+    .toast.show { opacity: 1; }
+    .toast.error { border-color: var(--danger); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>AI Riya — Admin Panel</h1>
+    <a href="/">→ Test page</a>
+  </header>
+
+  <main>
+    <section>
+      <h2>Saved prompts</h2>
+      <div id="prompts-list"></div>
+      <details>
+        <summary>+ Add new prompt</summary>
+        <form id="new-prompt-form">
+          <label>Name<input name="name" required maxlength="200"></label>
+          <label>System prompt<textarea name="system_prompt" required></textarea></label>
+          <label>Tags (comma-separated)<input name="tags"></label>
+          <label>Notes<input name="notes"></label>
+          <button type="submit">Save prompt</button>
+        </form>
+      </details>
+    </section>
+
+    <section>
+      <h2>Saved voices</h2>
+      <div id="voices-list"></div>
+      <details>
+        <summary>+ Add new voice</summary>
+        <form id="new-voice-form">
+          <label>Name<input name="name" required maxlength="200"></label>
+          <label>ElevenLabs voice ID<input name="voice_id" required></label>
+          <label>Language<input name="language" placeholder="english, tamil, ..."></label>
+          <label>Tags (comma-separated)<input name="tags"></label>
+          <label>Notes<input name="notes"></label>
+          <button type="submit">Save voice</button>
+        </form>
+      </details>
+    </section>
+  </main>
+
+  <div id="toast" class="toast"></div>
+
+  <script>
+    // ---------- helpers ----------
+    const $ = (sel) => document.querySelector(sel);
+    const create = (tag, props = {}) => Object.assign(document.createElement(tag), props);
+
+    function toast(msg, isError = false) {
+      const el = $('#toast');
+      el.textContent = msg;
+      el.classList.toggle('error', isError);
+      el.classList.add('show');
+      clearTimeout(toast._t);
+      toast._t = setTimeout(() => el.classList.remove('show'), 2500);
+    }
+
+    async function api(method, url, body = null) {
+      const opts = { method, headers: {} };
+      if (body !== null) {
+        opts.headers['Content-Type'] = 'application/json';
+        opts.body = JSON.stringify(body);
+      }
+      const r = await fetch(url, opts);
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({ detail: r.statusText }));
+        const msg = typeof err.detail === 'string' ? err.detail : JSON.stringify(err.detail);
+        throw new Error(msg);
+      }
+      return r.status === 204 ? null : r.json();
+    }
+
+    function parseTags(s) {
+      return (s || '').split(',').map(t => t.trim()).filter(Boolean);
+    }
+
+    // ---------- prompts ----------
+    async function loadPrompts() {
+      const list = $('#prompts-list');
+      list.innerHTML = '<div class="empty">Loading…</div>';
+      try {
+        const items = await api('GET', '/api/prompts');
+        list.innerHTML = '';
+        if (!items.length) {
+          list.innerHTML = '<div class="empty">No saved prompts yet. Add one below.</div>';
+          return;
+        }
+        items.forEach(p => list.appendChild(renderPrompt(p)));
+      } catch (e) {
+        list.innerHTML = '';
+        toast('Failed to load prompts: ' + e.message, true);
+      }
+    }
+
+    function renderPrompt(p) {
+      const div = create('div', { className: 'item' });
+      div.innerHTML = `
+        <div class="item-header">
+          <div style="min-width:0">
+            <div class="item-name"></div>
+            <div class="item-meta"></div>
+          </div>
+          <div class="actions">
+            <button class="secondary" data-action="edit">Edit</button>
+            <button class="danger" data-action="delete">Delete</button>
+          </div>
+        </div>
+        <div class="item-body"></div>
+        <div class="tags"></div>
+      `;
+      div.querySelector('.item-name').textContent = p.name;
+      const meta = `Updated ${p.updated_at}` + (p.notes ? ` — ${p.notes}` : '');
+      div.querySelector('.item-meta').textContent = meta;
+      div.querySelector('.item-body').textContent = p.system_prompt;
+      const tagsDiv = div.querySelector('.tags');
+      (p.tags || []).forEach(t => tagsDiv.appendChild(create('span', { className: 'tag', textContent: t })));
+      div.querySelector('[data-action="edit"]').onclick = () => editPrompt(div, p);
+      div.querySelector('[data-action="delete"]').onclick = () => deletePrompt(p);
+      return div;
+    }
+
+    function editPrompt(div, p) {
+      div.innerHTML = `
+        <form>
+          <label>Name<input name="name" required maxlength="200"></label>
+          <label>System prompt<textarea name="system_prompt" required></textarea></label>
+          <label>Tags (comma-separated)<input name="tags"></label>
+          <label>Notes<input name="notes"></label>
+          <div class="actions">
+            <button type="submit">Save</button>
+            <button type="button" class="secondary" data-action="cancel">Cancel</button>
+          </div>
+        </form>
+      `;
+      const f = div.querySelector('form');
+      f.elements.name.value = p.name;
+      f.elements.system_prompt.value = p.system_prompt;
+      f.elements.tags.value = (p.tags || []).join(', ');
+      f.elements.notes.value = p.notes || '';
+      f.onsubmit = async (e) => {
+        e.preventDefault();
+        try {
+          await api('PUT', `/api/prompts/${p.id}`, {
+            name: f.elements.name.value,
+            system_prompt: f.elements.system_prompt.value,
+            tags: parseTags(f.elements.tags.value),
+            notes: f.elements.notes.value,
+          });
+          toast('Prompt updated');
+          loadPrompts();
+        } catch (err) { toast('Update failed: ' + err.message, true); }
+      };
+      f.querySelector('[data-action="cancel"]').onclick = () => loadPrompts();
+    }
+
+    async function deletePrompt(p) {
+      if (!confirm(`Delete prompt "${p.name}"?`)) return;
+      try {
+        await api('DELETE', `/api/prompts/${p.id}`);
+        toast('Prompt deleted');
+        loadPrompts();
+      } catch (err) { toast('Delete failed: ' + err.message, true); }
+    }
+
+    $('#new-prompt-form').onsubmit = async (e) => {
+      e.preventDefault();
+      const f = e.target;
+      try {
+        await api('POST', '/api/prompts', {
+          name: f.elements.name.value,
+          system_prompt: f.elements.system_prompt.value,
+          tags: parseTags(f.elements.tags.value),
+          notes: f.elements.notes.value,
+        });
+        f.reset();
+        f.closest('details').open = false;
+        toast('Prompt saved');
+        loadPrompts();
+      } catch (err) { toast('Save failed: ' + err.message, true); }
+    };
+
+    // ---------- voices ----------
+    async function loadVoices() {
+      const list = $('#voices-list');
+      list.innerHTML = '<div class="empty">Loading…</div>';
+      try {
+        const items = await api('GET', '/api/voices');
+        list.innerHTML = '';
+        if (!items.length) {
+          list.innerHTML = '<div class="empty">No saved voices yet. Add one below.</div>';
+          return;
+        }
+        items.forEach(v => list.appendChild(renderVoice(v)));
+      } catch (e) {
+        list.innerHTML = '';
+        toast('Failed to load voices: ' + e.message, true);
+      }
+    }
+
+    function renderVoice(v) {
+      const div = create('div', { className: 'item' });
+      div.innerHTML = `
+        <div class="item-header">
+          <div style="min-width:0">
+            <div class="item-name"></div>
+            <div class="item-meta"></div>
+          </div>
+          <div class="actions">
+            <button class="secondary" data-action="edit">Edit</button>
+            <button class="danger" data-action="delete">Delete</button>
+          </div>
+        </div>
+        <div class="item-body"></div>
+        <div class="tags"></div>
+      `;
+      div.querySelector('.item-name').textContent = v.name;
+      const lang = v.language || 'no language';
+      div.querySelector('.item-meta').textContent = `${lang} — ID ${v.voice_id}`;
+      div.querySelector('.item-body').textContent = v.notes || '';
+      const tagsDiv = div.querySelector('.tags');
+      (v.tags || []).forEach(t => tagsDiv.appendChild(create('span', { className: 'tag', textContent: t })));
+      div.querySelector('[data-action="edit"]').onclick = () => editVoice(div, v);
+      div.querySelector('[data-action="delete"]').onclick = () => deleteVoice(v);
+      return div;
+    }
+
+    function editVoice(div, v) {
+      div.innerHTML = `
+        <form>
+          <label>Name<input name="name" required maxlength="200"></label>
+          <label>ElevenLabs voice ID<input name="voice_id" required></label>
+          <label>Language<input name="language"></label>
+          <label>Tags (comma-separated)<input name="tags"></label>
+          <label>Notes<input name="notes"></label>
+          <div class="actions">
+            <button type="submit">Save</button>
+            <button type="button" class="secondary" data-action="cancel">Cancel</button>
+          </div>
+        </form>
+      `;
+      const f = div.querySelector('form');
+      f.elements.name.value = v.name;
+      f.elements.voice_id.value = v.voice_id;
+      f.elements.language.value = v.language || '';
+      f.elements.tags.value = (v.tags || []).join(', ');
+      f.elements.notes.value = v.notes || '';
+      f.onsubmit = async (e) => {
+        e.preventDefault();
+        try {
+          await api('PUT', `/api/voices/${v.id}`, {
+            name: f.elements.name.value,
+            voice_id: f.elements.voice_id.value,
+            language: f.elements.language.value,
+            tags: parseTags(f.elements.tags.value),
+            notes: f.elements.notes.value,
+          });
+          toast('Voice updated');
+          loadVoices();
+        } catch (err) { toast('Update failed: ' + err.message, true); }
+      };
+      f.querySelector('[data-action="cancel"]').onclick = () => loadVoices();
+    }
+
+    async function deleteVoice(v) {
+      if (!confirm(`Delete voice "${v.name}"?`)) return;
+      try {
+        await api('DELETE', `/api/voices/${v.id}`);
+        toast('Voice deleted');
+        loadVoices();
+      } catch (err) { toast('Delete failed: ' + err.message, true); }
+    }
+
+    $('#new-voice-form').onsubmit = async (e) => {
+      e.preventDefault();
+      const f = e.target;
+      try {
+        await api('POST', '/api/voices', {
+          name: f.elements.name.value,
+          voice_id: f.elements.voice_id.value,
+          language: f.elements.language.value,
+          tags: parseTags(f.elements.tags.value),
+          notes: f.elements.notes.value,
+        });
+        f.reset();
+        f.closest('details').open = false;
+        toast('Voice saved');
+        loadVoices();
+      } catch (err) { toast('Save failed: ' + err.message, true); }
+    };
+
+    // ---------- initial load ----------
+    loadPrompts();
+    loadVoices();
+  </script>
+</body>
+</html>

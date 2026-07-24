@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AI Riya — Settings</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #3b82f6;
+      --accent-hover: #2563eb;
+      --success: #10b981;
+      --danger: #ef4444;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+    }
+    header {
+      padding: 1rem 2rem;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      position: sticky;
+      top: 0;
+      background: var(--bg);
+      z-index: 10;
+    }
+    header h1 { margin: 0; font-size: 1.15rem; font-weight: 600; }
+    header .links { display: flex; gap: 1.25rem; align-items: center; }
+    header a { color: var(--accent); text-decoration: none; font-size: 0.9rem; }
+    header a:hover { color: var(--accent-hover); }
+    main { max-width: 1000px; margin: 1.5rem auto 5rem; padding: 0 2rem; }
+    .intro {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--accent);
+      border-radius: 8px;
+      padding: 0.85rem 1.1rem;
+      margin-bottom: 1.5rem;
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
+    .group { margin-bottom: 1.75rem; }
+    .group > h2 {
+      font-size: 0.78rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin: 0 0 0.6rem;
+      padding-bottom: 0.4rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .setting {
+      display: grid;
+      grid-template-columns: 300px minmax(280px, 1fr);
+      gap: 1.5rem;
+      padding: 1rem 0.25rem;
+      border-bottom: 1px solid var(--border);
+      align-items: start;
+    }
+    .setting:last-child { border-bottom: none; }
+    @media (max-width: 720px) { .setting { grid-template-columns: 1fr; gap: 0.5rem; } }
+    .setting .name {
+      font-family: ui-monospace, SFMono-Regular, monospace;
+      font-size: 0.82rem;
+      color: var(--text);
+      word-break: break-word;
+      padding-top: 0.45rem;
+    }
+    .setting .control { display: grid; gap: 0.5rem; }
+    select, input[type="text"], input[type="number"] {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 0.5rem;
+      border-radius: 4px;
+      font: inherit;
+      font-size: 0.88rem;
+      width: 100%;
+      max-width: 560px;
+    }
+    select:focus, input:focus { outline: none; border-color: var(--accent); }
+    .bool-wrap { display: flex; align-items: center; gap: 0.5rem; }
+    input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--accent); }
+    .desc { font-size: 0.78rem; color: var(--muted); max-width: 560px; }
+    .actionbar {
+      position: fixed;
+      bottom: 0; left: 0; right: 0;
+      background: var(--card);
+      border-top: 1px solid var(--border);
+      padding: 0.85rem 2rem;
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+      gap: 1rem;
+      box-shadow: 0 -4px 12px rgba(0,0,0,0.3);
+    }
+    .actionbar .count { color: var(--muted); font-size: 0.85rem; margin-right: auto; }
+    button {
+      background: var(--accent);
+      color: white;
+      border: none;
+      padding: 0.6rem 1.4rem;
+      border-radius: 4px;
+      font-size: 0.95rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.15s, opacity 0.15s;
+    }
+    button:hover:not(:disabled) { background: var(--accent-hover); }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    button.secondary { background: transparent; border: 1px solid var(--border); color: var(--text); }
+    button.secondary:hover:not(:disabled) { background: var(--bg); }
+    .toast {
+      position: fixed;
+      bottom: 5rem;
+      right: 1.5rem;
+      background: var(--card);
+      border: 1px solid var(--success);
+      color: var(--text);
+      padding: 0.6rem 1rem;
+      border-radius: 6px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s;
+      font-size: 0.9rem;
+      max-width: 340px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    }
+    .toast.show { opacity: 1; }
+    .toast.error { border-color: var(--danger); }
+    .loading { color: var(--muted); padding: 2rem 0; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>AI Riya — Settings</h1>
+    <div class="links">
+      <a href="/">→ Test Call</a>
+      <a href="/admin">→ Prompts &amp; Voices</a>
+    </div>
+  </header>
+
+  <main>
+    <div class="intro">
+      Voice-agent configuration. Fully ElevenLabs (STT&nbsp;+&nbsp;TTS) — Sarvam removed.
+      Changes apply to the <strong>next</strong> call you start. Prompt &amp; voice are
+      chosen on the <a href="/">Test Call</a> page.
+    </div>
+    <div id="groups"><div class="loading">Loading settings…</div></div>
+  </main>
+
+  <div class="actionbar">
+    <span class="count" id="count"></span>
+    <button class="secondary" id="reset-btn" title="Reload saved values from the server">Reload</button>
+    <button id="save-btn" disabled>Save</button>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <script>
+    const $ = (sel) => document.querySelector(sel);
+    let settings = [];
+
+    function toast(msg, isError = false) {
+      const el = $('#toast');
+      el.textContent = msg;
+      el.classList.toggle('error', isError);
+      el.classList.add('show');
+      clearTimeout(toast._t);
+      toast._t = setTimeout(() => el.classList.remove('show'), 2800);
+    }
+
+    function controlFor(s) {
+      const id = 'f_' + s.key;
+      if (s.type === 'select') {
+        const opts = s.choices.map(c =>
+          `<option value="${c.value}" ${c.value === s.value ? 'selected' : ''}>${c.label}</option>`
+        ).join('');
+        return `<select id="${id}" data-key="${s.key}" data-type="${s.type}">${opts}</select>`;
+      }
+      if (s.type === 'bool') {
+        return `<label class="bool-wrap">
+          <input type="checkbox" id="${id}" data-key="${s.key}" data-type="${s.type}" ${s.value ? 'checked' : ''}>
+          <span>${s.value ? 'Enabled' : 'Disabled'}</span>
+        </label>`;
+      }
+      if (s.type === 'number' || s.type === 'int') {
+        const step = s.step != null ? s.step : (s.type === 'int' ? 1 : 0.01);
+        const min = s.min != null ? `min="${s.min}"` : '';
+        const max = s.max != null ? `max="${s.max}"` : '';
+        return `<input type="number" id="${id}" data-key="${s.key}" data-type="${s.type}"
+                  value="${s.value}" step="${step}" ${min} ${max}>`;
+      }
+      // text
+      const ph = s.type === 'text' ? 'placeholder="(blank = auto)"' : '';
+      return `<input type="text" id="${id}" data-key="${s.key}" data-type="${s.type}"
+                value="${(s.value ?? '').toString().replace(/"/g, '&quot;')}" ${ph}>`;
+    }
+
+    function render() {
+      const groups = [];
+      const seen = new Map();
+      settings.forEach(s => {
+        if (!seen.has(s.group)) { seen.set(s.group, []); groups.push(s.group); }
+        seen.get(s.group).push(s);
+      });
+      const html = groups.map(g => `
+        <section class="group">
+          <h2>${g}</h2>
+          ${seen.get(g).map(s => `
+            <div class="setting">
+              <div class="name">${s.label}</div>
+              <div class="control">
+                ${controlFor(s)}
+                <div class="desc">${s.description}</div>
+              </div>
+            </div>
+          `).join('')}
+        </section>
+      `).join('');
+      $('#groups').innerHTML = html;
+      $('#count').textContent = `${settings.length} settings`;
+      $('#save-btn').disabled = false;
+
+      // Live "Enabled/Disabled" label for checkboxes.
+      document.querySelectorAll('input[data-type="bool"]').forEach(cb => {
+        cb.onchange = () => { cb.nextElementSibling.textContent = cb.checked ? 'Enabled' : 'Disabled'; };
+      });
+    }
+
+    async function load() {
+      try {
+        const r = await fetch('/api/settings');
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        settings = await r.json();
+        render();
+      } catch (e) {
+        $('#groups').innerHTML = `<div class="loading">Failed to load: ${e.message}</div>`;
+        toast('Failed to load settings: ' + e.message, true);
+      }
+    }
+
+    function collect() {
+      const values = {};
+      document.querySelectorAll('[data-key]').forEach(el => {
+        const key = el.dataset.key, type = el.dataset.type;
+        if (type === 'bool') values[key] = el.checked;
+        else values[key] = el.value;
+      });
+      return values;
+    }
+
+    async function save() {
+      const btn = $('#save-btn');
+      btn.disabled = true;
+      const original = btn.textContent;
+      btn.textContent = 'Saving…';
+      try {
+        const r = await fetch('/api/settings', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ values: collect() }),
+        });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const fresh = await r.json();
+        // Re-sync UI to the server's coerced values (clamps invalid input).
+        settings.forEach(s => { if (s.key in fresh) s.value = fresh[s.key]; });
+        render();
+        toast('Settings saved ✓');
+      } catch (e) {
+        toast('Save failed: ' + e.message, true);
+      } finally {
+        btn.textContent = original;
+        btn.disabled = false;
+      }
+    }
+
+    $('#save-btn').onclick = save;
+    $('#reset-btn').onclick = load;
+    load();
+  </script>
+</body>
+</html>

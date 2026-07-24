@@ -1,0 +1,723 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AI Riya — Test Call</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #3b82f6;
+      --accent-hover: #2563eb;
+      --danger: #ef4444;
+      --success: #10b981;
+      --warning: #f59e0b;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+    }
+    header {
+      padding: 1rem 2rem;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    header h1 { margin: 0; font-size: 1.15rem; font-weight: 600; }
+    header a { color: var(--accent); text-decoration: none; font-size: 0.9rem; }
+    header a:hover { color: var(--accent-hover); }
+    main {
+      max-width: 800px;
+      margin: 2rem auto;
+      padding: 0 2rem;
+      display: grid;
+      gap: 1.5rem;
+    }
+    section {
+      background: var(--card);
+      border-radius: 8px;
+      padding: 1.5rem;
+    }
+    section h2 { margin: 0 0 1rem; font-size: 1.05rem; }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    @media (max-width: 600px) { .row { grid-template-columns: 1fr; } }
+    label {
+      display: grid;
+      gap: 0.3rem;
+      font-size: 0.82rem;
+      color: var(--muted);
+    }
+    select, input, textarea {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 0.5rem;
+      border-radius: 4px;
+      font: inherit;
+      font-size: 0.9rem;
+    }
+    select:focus, input:focus, textarea:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+    textarea {
+      resize: vertical;
+      min-height: 140px;
+      font-family: ui-monospace, SFMono-Regular, monospace;
+      font-size: 0.85rem;
+    }
+    .preview {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 0.75rem;
+      font-family: ui-monospace, SFMono-Regular, monospace;
+      font-size: 0.82rem;
+      color: var(--muted);
+      white-space: pre-wrap;
+      max-height: 200px;
+      overflow: auto;
+      min-height: 60px;
+    }
+    .controls { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; }
+    button {
+      background: var(--accent);
+      color: white;
+      border: none;
+      padding: 0.6rem 1.2rem;
+      border-radius: 4px;
+      font-size: 0.95rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.15s, opacity 0.15s;
+    }
+    button:hover:not(:disabled) { background: var(--accent-hover); }
+    button:disabled { opacity: 0.45; cursor: not-allowed; }
+    button.danger { background: var(--danger); }
+    button.danger:hover:not(:disabled) { background: #dc2626; }
+    .status {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.4rem 0.8rem;
+      border-radius: 999px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
+    .status .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--muted);
+    }
+    .status.connecting .dot { background: var(--warning); animation: pulse 1.2s infinite; }
+    .status.connected .dot { background: var(--success); animation: pulse 1.5s infinite; }
+    .status.error .dot { background: var(--danger); }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+    .captions {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 0.75rem;
+      font-size: 0.85rem;
+      max-height: 220px;
+      overflow: auto;
+      min-height: 80px;
+    }
+    .captions:empty::before {
+      content: "Transcripts and bot replies will appear here once the call starts…";
+      color: var(--muted);
+      font-style: italic;
+    }
+    .caption-line { padding: 0.25rem 0; border-bottom: 1px solid var(--border); }
+    .caption-line:last-child { border-bottom: none; }
+    .caption-line .who { color: var(--muted); font-size: 0.75rem; }
+    .toast {
+      position: fixed;
+      bottom: 1rem;
+      right: 1rem;
+      background: var(--card);
+      border: 1px solid var(--success);
+      color: var(--text);
+      padding: 0.6rem 1rem;
+      border-radius: 6px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s;
+      font-size: 0.9rem;
+      max-width: 320px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    }
+    .toast.show { opacity: 1; }
+    .toast.error { border-color: var(--danger); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>AI Riya — Test Call</h1>
+    <span style="display:flex;gap:1.25rem;align-items:center">
+      <a href="/settings">→ Settings</a>
+      <a href="/admin">→ Admin</a>
+    </span>
+  </header>
+
+  <main>
+    <section>
+      <h2>Choose what to test</h2>
+      <div class="row">
+        <label>
+          Saved prompt
+          <select id="prompt-select"><option value="">— pick a prompt —</option></select>
+        </label>
+        <label>
+          Voice
+          <select id="voice-select"><option value="">— pick a voice —</option></select>
+        </label>
+        <label>
+          Language
+          <select id="lang-select">
+            <option value="">Ask on call (default)</option>
+            <option value="hin">हिंदी — Hindi</option>
+            <option value="tel">తెలుగు — Telugu</option>
+            <option value="tam">தமிழ் — Tamil</option>
+            <option value="kan">ಕನ್ನಡ — Kannada</option>
+            <option value="mal">മലയാളം — Malayalam</option>
+          </select>
+        </label>
+      </div>
+      <div style="font-size:0.78rem;color:var(--muted);margin-top:0.6rem">
+        Pick a language and Riya opens directly in it (skips “which language?”). Leave on
+        “Ask on call” to let her ask.
+      </div>
+      <div id="tts-hint" style="font-size:0.78rem;color:var(--muted);margin-top:0.6rem"></div>
+      <div style="margin-top:1rem">
+        <label>
+          System prompt preview (read-only)
+          <div id="prompt-preview" class="preview"></div>
+        </label>
+      </div>
+    </section>
+
+    <section>
+      <h2>Voice tuning</h2>
+      <div class="row">
+        <label>
+          Speed <span id="speed-val" style="color:var(--text)">1.00×</span>
+          <input id="speed-slider" type="range" min="0.7" max="1.2" step="0.05" value="1.0">
+        </label>
+        <label>
+          Temperature <span id="temp-val" style="color:var(--text)">0.70</span>
+          <input id="temp-slider" type="range" min="0" max="1.5" step="0.05" value="0.7">
+        </label>
+      </div>
+      <div style="font-size:0.78rem;color:var(--muted);margin-top:0.5rem">
+        Speed = how fast Riya talks (ElevenLabs). Temperature = LLM creativity (higher = more varied).
+      </div>
+    </section>
+
+    <section>
+      <h2>Call</h2>
+      <div class="controls">
+        <button id="start-btn" disabled>Start Call</button>
+        <button id="end-btn" class="danger" disabled>End Call</button>
+        <span id="status" class="status"><span class="dot"></span><span id="status-text">Idle</span></span>
+      </div>
+      <div style="margin-top:1rem">
+        <label>
+          Live transcript
+          <div id="captions" class="captions"></div>
+        </label>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/protobufjs@7.4.0/dist/protobuf.min.js"></script>
+  <script>
+    // ---------- protobuf schema (mirrors pipecat/frames/frames.proto) ----------
+    const PROTO_SOURCE = `
+      syntax = "proto3";
+      package pipecat;
+      message TextFrame {
+        uint64 id = 1;
+        string name = 2;
+        string text = 3;
+      }
+      message AudioRawFrame {
+        uint64 id = 1;
+        string name = 2;
+        bytes audio = 3;
+        uint32 sample_rate = 4;
+        uint32 num_channels = 5;
+        optional uint64 pts = 6;
+      }
+      message TranscriptionFrame {
+        uint64 id = 1;
+        string name = 2;
+        string text = 3;
+        string user_id = 4;
+        string timestamp = 5;
+      }
+      message MessageFrame {
+        string data = 1;
+      }
+      message Frame {
+        oneof frame {
+          TextFrame text = 1;
+          AudioRawFrame audio = 2;
+          TranscriptionFrame transcription = 3;
+          MessageFrame message = 4;
+        }
+      }
+    `;
+    const root = protobuf.parse(PROTO_SOURCE).root;
+    const FrameType = root.lookupType("pipecat.Frame");
+
+    // ---------- helpers ----------
+    const $ = (sel) => document.querySelector(sel);
+
+    function toast(msg, isError = false) {
+      const el = $('#toast');
+      el.textContent = msg;
+      el.classList.toggle('error', isError);
+      el.classList.add('show');
+      clearTimeout(toast._t);
+      toast._t = setTimeout(() => el.classList.remove('show'), 2500);
+    }
+
+    async function api(method, url) {
+      const r = await fetch(url, { method });
+      if (!r.ok) throw new Error(`${method} ${url} -> ${r.status}`);
+      return r.json();
+    }
+
+    function setStatus(state, text) {
+      const s = $('#status');
+      s.classList.remove('connecting', 'connected', 'error');
+      if (state) s.classList.add(state);
+      $('#status-text').textContent = text;
+    }
+
+    // Track the currently-streaming caption spans for bot text + interim user text.
+    let _activeBotSpan = null;
+    let _activeUserInterimDiv = null;
+
+    function appendCaption(who, text) {
+      _activeBotSpan = null;  // any new line ends the active bot stream
+      _activeUserInterimDiv = null;  // and any interim user line is finalized
+      const div = document.createElement('div');
+      div.className = 'caption-line';
+      const w = document.createElement('span');
+      w.className = 'who';
+      w.textContent = who + ': ';
+      const t = document.createElement('span');
+      t.textContent = text;
+      div.appendChild(w);
+      div.appendChild(t);
+      const cap = $('#captions');
+      cap.appendChild(div);
+      cap.scrollTop = cap.scrollHeight;
+    }
+
+    function appendBotChunk(text) {
+      _activeUserInterimDiv = null;
+      if (!_activeBotSpan) {
+        const div = document.createElement('div');
+        div.className = 'caption-line';
+        const w = document.createElement('span');
+        w.className = 'who';
+        w.textContent = 'Riya: ';
+        const t = document.createElement('span');
+        t.textContent = '';
+        div.appendChild(w);
+        div.appendChild(t);
+        $('#captions').appendChild(div);
+        _activeBotSpan = t;
+      }
+      _activeBotSpan.textContent += text;
+      const cap = $('#captions');
+      cap.scrollTop = cap.scrollHeight;
+    }
+
+    function showUserInterim(text) {
+      // Live partial transcript while the user is still speaking.
+      // Replaces the active interim line in place; finalized when a USER: arrives.
+      _activeBotSpan = null;
+      if (!_activeUserInterimDiv) {
+        const div = document.createElement('div');
+        div.className = 'caption-line';
+        div.style.opacity = '0.6';  // subtler styling for "still being spoken"
+        const w = document.createElement('span');
+        w.className = 'who';
+        w.textContent = 'You: ';
+        const t = document.createElement('span');
+        div.appendChild(w);
+        div.appendChild(t);
+        $('#captions').appendChild(div);
+        _activeUserInterimDiv = { div, span: t };
+      }
+      _activeUserInterimDiv.span.textContent = text;
+      const cap = $('#captions');
+      cap.scrollTop = cap.scrollHeight;
+    }
+
+    // ---------- state ----------
+    const TARGET_SAMPLE_RATE = 16000;  // Pipecat / Whisper expect 16kHz mono
+    const JITTER_S = 0.18;  // playback cushion (s) to absorb network jitter — prevents choppy audio
+    let prompts = [], voices = [];
+    let ws = null;
+    let audioCtx = null;
+    let micStream = null;
+    let micProcessor = null;
+    let micSource = null;
+    let nextPlayTime = 0;
+
+    // ---------- initial load ----------
+    let ttsProvider = 'elevenlabs';
+    let smallestLang = '';
+
+    async function loadDropdowns() {
+      let settings;
+      try {
+        [prompts, settings] = await Promise.all([
+          api('GET', '/api/prompts'),
+          api('GET', '/api/settings'),
+        ]);
+      } catch (e) {
+        toast('Failed to load saved data: ' + e.message, true);
+        return;
+      }
+      const cfg = {};
+      settings.forEach(s => { cfg[s.key] = s.value; });
+      ttsProvider = cfg.TTS_PROVIDER || 'elevenlabs';
+      smallestLang = cfg.SMALLEST_LANGUAGE || '';
+
+      // Load the voice set that matches the active TTS provider.
+      try {
+        if (ttsProvider === 'smallest') {
+          const sv = await api('GET', '/api/smallest/voices');
+          // Normalise to the same shape the rest of the code expects; show the
+          // languages each voice supports so Telugu-capable ones are obvious.
+          voices = sv.map(v => ({
+            id: v.voice_id, voice_id: v.voice_id, name: v.name,
+            language: (v.languages || []).join('/'),
+          }));
+        } else {
+          voices = await api('GET', '/api/voices');
+        }
+      } catch (e) {
+        toast('Failed to load voices: ' + e.message, true);
+        voices = [];
+      }
+
+      const hint = $('#tts-hint');
+      if (ttsProvider === 'smallest') {
+        hint.innerHTML = `🔊 TTS: <b>Smallest.ai</b> (lightning-v3.1${smallestLang ? ', lang=' + smallestLang : ''}). ` +
+          `Voices below are Smallest voices — all speak Hindi / English / Tamil / Telugu / Kannada / Malayalam. ` +
+          `Change voice/language on <a href="/settings" style="color:var(--accent)">Settings</a>.`;
+      } else {
+        hint.innerHTML = `🔊 TTS: <b>ElevenLabs</b> (${cfg.ELEVENLABS_TTS_MODEL || ''}). ` +
+          `Switch provider on <a href="/settings" style="color:var(--accent)">Settings</a>.`;
+      }
+
+      const ps = $('#prompt-select');
+      const vs = $('#voice-select');
+      prompts.forEach(p => {
+        const o = document.createElement('option');
+        o.value = p.id;
+        o.textContent = p.name;
+        ps.appendChild(o);
+      });
+      voices.forEach(v => {
+        const o = document.createElement('option');
+        o.value = v.id;
+        const lang = v.language ? ` [${v.language}]` : '';
+        o.textContent = v.name + lang;
+        vs.appendChild(o);
+      });
+      ps.onchange = () => {
+        const p = prompts.find(x => x.id === ps.value);
+        $('#prompt-preview').textContent = p ? p.system_prompt : '';
+        updateStartButton();
+      };
+      vs.onchange = updateStartButton;
+    }
+
+    function updateStartButton() {
+      const ready = $('#prompt-select').value && $('#voice-select').value;
+      $('#start-btn').disabled = !ready || ws !== null;
+    }
+
+    // ---------- audio: capture mic, send as protobuf frames ----------
+    async function startMic() {
+      micStream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          channelCount: 1,
+          echoCancellation: true,   // Riya ki apni awaaz mic se wapas na aaye (echo)
+          noiseSuppression: true,   // fan/AC/traffic background kaate
+          autoGainControl: true,    // ON — warna audio itna dheema ho jaata hai ki
+                                    // VAD/STT trigger hi nahi hote (no reply problem)
+          sampleRate: 16000,
+        },
+      });
+
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      // Chrome can leave AudioContext "suspended" after creation; resume it.
+      if (audioCtx.state === 'suspended') await audioCtx.resume();
+      const inputRate = audioCtx.sampleRate;
+      console.log(`[mic] AudioContext: state=${audioCtx.state}, native rate=${inputRate}Hz`);
+
+      micSource = audioCtx.createMediaStreamSource(micStream);
+
+      // GainNode: AGC off hai, to thoda boost zaroori hai warna Silero VAD ko
+      // awaaz hi nahi dikhti (server-side min_volume 0.5 gate). 2.0 se real
+      // speech register hoti hai; confidence 0.7 background ko phir bhi rejects.
+      const micGain = audioCtx.createGain();
+      micGain.gain.value = 2.0;
+
+      // ScriptProcessorNode is deprecated but well-supported and dead simple.
+      // Buffer = 2048 samples; at 48kHz that's ~43ms latency.
+      micProcessor = audioCtx.createScriptProcessor(2048, 1, 1);
+      let micChunkCount = 0;
+      micProcessor.onaudioprocess = (e) => {
+        const float32 = e.inputBuffer.getChannelData(0);
+        // Peak level meter every ~50 chunks (~2s at 48kHz) — confirms real signal vs silence.
+        micChunkCount++;
+        if (micChunkCount % 50 === 0) {
+          let peak = 0;
+          for (let i = 0; i < float32.length; i++) {
+            const v = Math.abs(float32[i]);
+            if (v > peak) peak = v;
+          }
+          const label = peak < 0.01 ? 'SILENT' : (peak < 0.1 ? 'quiet' : 'audio detected');
+          console.log(`[mic] chunk #${micChunkCount} peak=${peak.toFixed(3)} (${label})`);
+        }
+        const downsampled = downsample(float32, inputRate, TARGET_SAMPLE_RATE);
+        const int16 = floatToInt16(downsampled);
+        sendAudio(int16);
+      };
+      micSource.connect(micGain);
+      micGain.connect(micProcessor);
+      // Connect to a muted destination so the processor actually runs.
+      micProcessor.connect(audioCtx.destination);
+    }
+
+    function stopMic() {
+      try { micProcessor && micProcessor.disconnect(); } catch (_) {}
+      try { micSource && micSource.disconnect(); } catch (_) {}
+      try { micStream && micStream.getTracks().forEach(t => t.stop()); } catch (_) {}
+      try { audioCtx && audioCtx.close(); } catch (_) {}
+      micProcessor = micSource = micStream = audioCtx = null;
+      nextPlayTime = 0;
+    }
+
+    function downsample(input, fromRate, toRate) {
+      if (fromRate === toRate) return input;
+      if (fromRate < toRate) return input;  // shouldn't happen for our case
+      const ratio = fromRate / toRate;
+      const outLen = Math.floor(input.length / ratio);
+      const out = new Float32Array(outLen);
+      // Average a small window of input samples per output sample (basic anti-aliasing)
+      for (let i = 0; i < outLen; i++) {
+        const start = Math.floor(i * ratio);
+        const end = Math.min(input.length, Math.floor((i + 1) * ratio));
+        let sum = 0, n = 0;
+        for (let j = start; j < end; j++) { sum += input[j]; n++; }
+        out[i] = n ? sum / n : 0;
+      }
+      return out;
+    }
+
+    function floatToInt16(float32) {
+      const int16 = new Int16Array(float32.length);
+      for (let i = 0; i < float32.length; i++) {
+        let s = Math.max(-1, Math.min(1, float32[i]));
+        int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+      }
+      return int16;
+    }
+
+    function sendAudio(int16) {
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      const audioBytes = new Uint8Array(int16.buffer, int16.byteOffset, int16.byteLength);
+      const message = FrameType.create({
+        audio: {
+          id: 0,
+          name: "",
+          audio: audioBytes,
+          sampleRate: TARGET_SAMPLE_RATE,
+          numChannels: 1,
+        },
+      });
+      const wire = FrameType.encode(message).finish();
+      ws.send(wire);
+    }
+
+    // ---------- audio: receive frames, play through speakers ----------
+    function playPCM(int16Bytes, sampleRate) {
+      if (!audioCtx) return;
+      const view = new DataView(int16Bytes.buffer, int16Bytes.byteOffset, int16Bytes.byteLength);
+      const samples = int16Bytes.byteLength / 2;
+      const float32 = new Float32Array(samples);
+      for (let i = 0; i < samples; i++) {
+        const s = view.getInt16(i * 2, true);  // little-endian
+        float32[i] = s / (s < 0 ? 0x8000 : 0x7FFF);
+      }
+      const buf = audioCtx.createBuffer(1, samples, sampleRate);
+      buf.getChannelData(0).set(float32);
+      const src = audioCtx.createBufferSource();
+      src.buffer = buf;
+      src.connect(audioCtx.destination);
+      // Jitter buffer: audio streams from the server (fly.io) with network jitter
+      // and arrives in per-sentence bursts. Without a cushion, a late chunk makes
+      // nextPlayTime fall behind currentTime → gap/underrun → choppy, broken voice.
+      // When we've fallen behind (fresh burst or underrun), restart scheduling
+      // JITTER_S ahead so following chunks land before their play time (gapless).
+      if (nextPlayTime < audioCtx.currentTime + 0.02) {
+        nextPlayTime = audioCtx.currentTime + JITTER_S;
+      }
+      src.start(nextPlayTime);
+      nextPlayTime += buf.duration;
+    }
+
+    async function handleWsMessage(ev) {
+      // Captions arrive as JSON text frames (side channel); audio as binary protobuf.
+      if (typeof ev.data === 'string') {
+        try {
+          const msg = JSON.parse(ev.data);
+          if (msg.type === 'user_interim') showUserInterim(msg.text || '');
+          else if (msg.type === 'user') appendCaption('You', (msg.text || '').trim());
+          else if (msg.type === 'bot') appendBotChunk(msg.text || '');
+        } catch (e) {
+          console.warn('caption parse failed', e, ev.data);
+        }
+        return;
+      }
+      const buf = ev.data instanceof Blob
+        ? new Uint8Array(await ev.data.arrayBuffer())
+        : new Uint8Array(ev.data);
+      let frame;
+      try {
+        frame = FrameType.decode(buf);
+      } catch (e) {
+        console.warn('decode failed', e);
+        return;
+      }
+      if (frame.audio && frame.audio.audio && frame.audio.audio.length) {
+        playPCM(frame.audio.audio, frame.audio.sampleRate || 24000);
+      }
+      // (text/transcription paths via protobuf are no longer used — JSON side
+      // channel above handles all captions)
+    }
+
+    // ---------- call lifecycle ----------
+    async function startCall() {
+      const promptId = $('#prompt-select').value;
+      const voiceId = $('#voice-select').value;
+      const p = prompts.find(x => x.id === promptId);
+      const v = voices.find(x => x.id === voiceId);
+      if (!p || !v) return;
+      if (!v.voice_id || v.voice_id.startsWith('PLACEHOLDER_')) {
+        toast('That voice still has a PLACEHOLDER ID. Edit it on the admin page first.', true);
+        return;
+      }
+
+      setStatus('connecting', 'Connecting…');
+      $('#start-btn').disabled = true;
+      $('#captions').innerHTML = '';
+
+      try {
+        await startMic();  // ask permission + open AudioContext
+      } catch (e) {
+        setStatus('error', 'Mic error: ' + e.message);
+        toast('Microphone permission denied or unavailable', true);
+        return;
+      }
+
+      // Build WebSocket URL relative to current page (handles 8000 vs 7860)
+      const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${wsProto}//${location.host}/ws`;
+      ws = new WebSocket(wsUrl);
+      ws.binaryType = 'arraybuffer';
+
+      ws.onopen = () => {
+        // First message must be the JSON config
+        ws.send(JSON.stringify({
+          system_prompt: p.system_prompt,
+          voice_id: v.voice_id,
+          speed: parseFloat($('#speed-slider').value),
+          temperature: parseFloat($('#temp-slider').value),
+          language: $('#lang-select').value,
+        }));
+        setStatus('connected', 'Connected — speak whenever you want');
+        $('#end-btn').disabled = false;
+      };
+      ws.onmessage = handleWsMessage;
+      ws.onerror = (e) => {
+        console.error('ws error', e);
+        setStatus('error', 'WebSocket error');
+      };
+      ws.onclose = (e) => {
+        const reason = e.reason ? ` — ${e.reason}` : '';
+        setStatus(null, `Call ended${reason}`);
+        cleanupCall();
+      };
+    }
+
+    function endCall() {
+      if (ws && ws.readyState === WebSocket.OPEN) ws.close(1000, 'user ended call');
+      else cleanupCall();
+    }
+
+    function cleanupCall() {
+      stopMic();
+      ws = null;
+      $('#end-btn').disabled = true;
+      updateStartButton();
+    }
+
+    // ---------- voice tuning sliders ----------
+    function persistSlider(id, key, fmt) {
+      const el = $(id);
+      const valEl = $(id.replace('slider', 'val'));
+      const saved = localStorage.getItem(key);
+      if (saved !== null) el.value = saved;
+      valEl.textContent = fmt(parseFloat(el.value));
+      el.oninput = () => {
+        valEl.textContent = fmt(parseFloat(el.value));
+        localStorage.setItem(key, el.value);
+      };
+    }
+    persistSlider('#speed-slider', 'riya.speed', v => v.toFixed(2) + '×');
+    persistSlider('#temp-slider', 'riya.temp', v => v.toFixed(2));
+
+    // Persist the pre-selected language across reloads.
+    (function persistLang() {
+      const el = $('#lang-select');
+      const saved = localStorage.getItem('riya.lang');
+      if (saved !== null) el.value = saved;
+      el.onchange = () => localStorage.setItem('riya.lang', el.value);
+    })();
+
+    // ---------- wire up ----------
+    $('#start-btn').onclick = startCall;
+    $('#end-btn').onclick = endCall;
+    loadDropdowns();
+  </script>
+</body>
+</html>

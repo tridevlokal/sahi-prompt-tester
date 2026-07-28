@@ -18,3 +18,8 @@ scratchpad_server.log
 scratchpad_fly_logs.txt
 scratchpad_parse_convos.py
 riya_test_conversations.md
+sahi-english-*.json
+*service-account*.json
+*service_account*.json
+gcp-*.json
+*-credentials.json

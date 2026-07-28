@@ -153,6 +153,7 @@ SCHEMA: list[dict[str, Any]] = [
             {"value": "elevenlabs", "label": "elevenlabs — ElevenLabs (streaming + eleven_v3 HTTP)"},
             {"value": "smallest", "label": "smallest — Smallest.ai Waves (native WebSocket, low latency, Indian langs)"},
             {"value": "gemini", "label": "gemini — Gemini 3.1 Flash TTS (API key; expressive, multilingual)"},
+            {"value": "google", "label": "google — Google Cloud TTS Chirp3-HD (service account; realtime, HD Indian voices)"},
         ],
         "description": "Which TTS engine synthesises Riya's voice. 'smallest' uses Smallest.ai's "
                        "WebSocket streaming (lightning-v3.1) — natural Hindi/Tamil/Telugu/Kannada/"
@@ -170,6 +171,7 @@ SCHEMA: list[dict[str, Any]] = [
         "choices": [
             {"value": "elevenlabs", "label": "elevenlabs — ElevenLabs Scribe (realtime WebSocket, low latency)"},
             {"value": "gemini", "label": "gemini — Gemini 3.1 Flash STT (batch per turn; multilingual, no lang lock)"},
+            {"value": "google", "label": "google — Google Cloud STT (service account; realtime, low latency)"},
         ],
         "description": "Which engine transcribes the learner's speech. 'elevenlabs' = realtime Scribe "
                        "(lowest latency). 'gemini' sends each utterance to gemini-3.1-flash-lite "
@@ -210,6 +212,27 @@ SCHEMA: list[dict[str, Any]] = [
         "type": "text",
         "default": "gemini-3.1-flash-lite",
         "description": "Gemini model that transcribes audio (used when STT_PROVIDER = gemini).",
+    },
+
+    # ---------- Google Cloud audio (service account) ----------
+    {
+        "key": "GOOGLE_TTS_VOICE",
+        "label": "GOOGLE_TTS_VOICE",
+        "group": "Google Cloud audio",
+        "type": "text",
+        "default": "Aoede",
+        "description": "Chirp3-HD voice NAME (e.g. Aoede, Charon, Kore, Achird). The final "
+                       "voice id is built as '<lang>-Chirp3-HD-<name>' from the picked language. "
+                       "Used when TTS_PROVIDER = google.",
+    },
+    {
+        "key": "GOOGLE_STT_MODEL",
+        "label": "GOOGLE_STT_MODEL",
+        "group": "Google Cloud audio",
+        "type": "text",
+        "default": "latest_long",
+        "description": "Google Cloud STT model (e.g. latest_long, long, chirp_2). Used when "
+                       "STT_PROVIDER = google.",
     },
 
     # ---------- TTS (Smallest.ai) ----------

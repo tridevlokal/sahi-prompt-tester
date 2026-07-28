@@ -69,6 +69,19 @@ from pipecat.turns.user_turn_strategies import UserTurnStrategies
 
 import settings_store
 from gemini_audio import GeminiFlashSTTService, GeminiFlashTTSService
+from pipecat.services.google.stt import GoogleSTTService
+from pipecat.services.google.tts import GoogleTTSService
+from pipecat.transcriptions.language import Language
+
+# Picker language code -> Google Cloud Language (STT) + BCP-47 code (Chirp3-HD voice ids).
+GOOGLE_LANG = {
+    "hin": Language.HI_IN, "tel": Language.TE_IN, "tam": Language.TA_IN,
+    "kan": Language.KN_IN, "mal": Language.ML_IN, "eng": Language.EN_US,
+}
+GOOGLE_LANG_CODE = {
+    "hin": "hi-IN", "tel": "te-IN", "tam": "ta-IN",
+    "kan": "kn-IN", "mal": "ml-IN", "eng": "en-US",
+}
 
 INPUT_SAMPLE_RATE = 16000
 OUTPUT_SAMPLE_RATE = 24000
@@ -544,9 +557,20 @@ async def run_bot(
 
     try:
         gkey = os.getenv("GOOGLE_API_KEY")
+        gcreds = os.getenv("GOOGLE_APPLICATION_CREDENTIALS") or "gcp-service-account.json"
+        lang_key = (language or "").strip().lower()
 
-        # STT: Gemini 3.1 Flash (batch per turn) or ElevenLabs Scribe (realtime).
-        if cfg["STT_PROVIDER"] == "gemini":
+        # STT: Google Cloud (realtime), Gemini 3.1 Flash (batch), or ElevenLabs Scribe.
+        if cfg["STT_PROVIDER"] == "google":
+            primary = GOOGLE_LANG.get(lang_key, Language.EN_US)
+            langs = [primary] if primary == Language.EN_US else [primary, Language.EN_US]
+            stt = GoogleSTTService(
+                credentials_path=gcreds,
+                params=GoogleSTTService.InputParams(languages=langs, model=cfg["GOOGLE_STT_MODEL"]),
+                sample_rate=INPUT_SAMPLE_RATE,
+            )
+            logger.info(f"[stt] Google Cloud STT langs={[l.value for l in langs]} model={cfg['GOOGLE_STT_MODEL']}")
+        elif cfg["STT_PROVIDER"] == "gemini":
             stt = GeminiFlashSTTService(
                 api_key=gkey, aiohttp_session=http_session,
                 model=cfg["GEMINI_STT_MODEL"], sample_rate=INPUT_SAMPLE_RATE,
@@ -555,8 +579,21 @@ async def run_bot(
         else:
             stt = _build_stt(cfg, http_base, stt_host, http_session)
 
-        # TTS: Gemini 3.1 Flash TTS or the ElevenLabs/Smallest factory.
-        if cfg["TTS_PROVIDER"] == "gemini":
+        # TTS: Google Cloud Chirp3-HD, Gemini 3.1 Flash, or the ElevenLabs/Smallest factory.
+        if cfg["TTS_PROVIDER"] == "google":
+            # Chirp3-HD voice id = "<lang>-Chirp3-HD-<VoiceName>"; the picked voice
+            # (a Chirp/Gemini name like "Aoede") wins, else GOOGLE_TTS_VOICE.
+            vname = (voice_id or "").strip() or cfg["GOOGLE_TTS_VOICE"]
+            code = GOOGLE_LANG_CODE.get(lang_key, "en-US")
+            gvoice_id = f"{code}-Chirp3-HD-{vname}"
+            tts = GoogleTTSService(
+                credentials_path=gcreds,
+                voice_id=gvoice_id,
+                params=GoogleTTSService.InputParams(language=GOOGLE_LANG.get(lang_key, Language.EN_US)),
+                sample_rate=OUTPUT_SAMPLE_RATE,
+            )
+            logger.info(f"[tts] Google Cloud TTS voice={gvoice_id}")
+        elif cfg["TTS_PROVIDER"] == "gemini":
             # The voice picked on the test page (a Gemini voice name like "Kore" /
             # "Aoede") wins; GEMINI_TTS_VOICE is only the fallback.
             gvoice = (voice_id or "").strip() or cfg["GEMINI_TTS_VOICE"]
@@ -572,7 +609,6 @@ async def run_bot(
         # If the learner pre-picked a language, pin it in the system prompt so Riya
         # reliably opens and stays in it (a seed turn alone drifts to English at
         # higher temperatures).
-        lang_key = (language or "").strip().lower()
         effective_prompt = system_prompt + _language_directive(lang_key)
 
         llm = GoogleLLMService(

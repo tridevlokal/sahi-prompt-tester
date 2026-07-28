@@ -11,6 +11,7 @@ GOOGLE_API_KEY the LLM already uses.
   (generateContent, audio inlineData) -> transcript. Batch (per turn), any language.
 """
 import base64
+import json
 
 import aiohttp
 from loguru import logger
@@ -49,7 +50,10 @@ class GeminiFlashTTSService(TTSService):
         # A style prompt steers delivery ("Say warmly and slowly: <text>"). Gemini
         # speaks the text after the instruction, not the instruction itself.
         prompt = f"{self._style}: {text}" if self._style else text
-        url = f"{GENAI_BASE}/models/{self._model}:generateContent?key={self._api_key}"
+        # STREAMING (SSE): audio chunks arrive as they're synthesised, so playback
+        # starts in ~1.5s instead of waiting ~7s for the whole clip. This is what
+        # kills the long pause between sentences.
+        url = f"{GENAI_BASE}/models/{self._model}:streamGenerateContent?alt=sse&key={self._api_key}"
         body = {
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {
@@ -65,33 +69,44 @@ class GeminiFlashTTSService(TTSService):
                 if resp.status != 200:
                     yield ErrorFrame(error=f"Gemini TTS {resp.status}: {(await resp.text())[:200]}")
                     return
-                data = await resp.json()
+                await self.start_tts_usage_metrics(text)
 
-            await self.start_tts_usage_metrics(text)
-            audio = self._extract_audio(data)
-            if not audio:
-                yield ErrorFrame(error=f"Gemini TTS: no audio in response")
-                return
+                first = True
+                got_any = False
+                async for raw in resp.content:
+                    line = raw.decode("utf-8", "replace").strip()
+                    if not line.startswith("data:"):
+                        continue
+                    payload = line[5:].strip()
+                    if not payload or payload == "[DONE]":
+                        continue
+                    try:
+                        data = json.loads(payload)
+                    except json.JSONDecodeError:
+                        continue
+                    for audio in self._iter_audio(data):
+                        got_any = True
+                        if first:
+                            await self.stop_ttfb_metrics()
+                            first = False
+                        yield TTSAudioRawFrame(audio, self.sample_rate, 1, context_id=context_id)
 
-            await self.stop_ttfb_metrics()
-            # The whole clip arrives at once (non-streaming); chunk it so the output
-            # transport pipelines playback smoothly (0.2s frames @ 24k/16-bit mono).
-            chunk = int(self.sample_rate * 2 * 0.2)
-            for i in range(0, len(audio), chunk):
-                yield TTSAudioRawFrame(audio[i:i + chunk], self.sample_rate, 1, context_id=context_id)
+                if not got_any:
+                    yield ErrorFrame(error="Gemini TTS: no audio in stream")
         except Exception as e:
             yield ErrorFrame(error=f"Gemini TTS failed: {e}")
 
     @staticmethod
-    def _extract_audio(data: dict) -> bytes:
+    def _iter_audio(data: dict):
+        """Yield decoded PCM from every audio part in a (streaming) response chunk."""
         try:
-            for p in data["candidates"][0]["content"]["parts"]:
-                inline = p.get("inlineData") or p.get("inline_data")
-                if inline and inline.get("data"):
-                    return base64.b64decode(inline["data"])
+            parts = data["candidates"][0]["content"]["parts"]
         except (KeyError, IndexError, TypeError):
-            pass
-        return b""
+            return
+        for p in parts:
+            inline = p.get("inlineData") or p.get("inline_data")
+            if inline and inline.get("data"):
+                yield base64.b64decode(inline["data"])
 
 
 class GeminiFlashSTTService(SegmentedSTTService):

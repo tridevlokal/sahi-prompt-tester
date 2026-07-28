@@ -77,6 +77,28 @@ def smallest_voices() -> list[dict]:
     return [dict(v) for v in SMALLEST_VOICES]
 
 
+# Gemini TTS prebuilt voices (name + vibe from Google docs). Tutor-friendly first.
+GEMINI_VOICES = [
+    ("Achird", "Friendly"), ("Sulafat", "Warm"), ("Aoede", "Breezy"),
+    ("Leda", "Youthful"), ("Callirhoe", "Easy-going"), ("Vindemiatrix", "Gentle"),
+    ("Kore", "Firm"), ("Puck", "Upbeat"), ("Autonoe", "Bright"), ("Zephyr", "Bright"),
+    ("Charon", "Informative"), ("Sadachbia", "Lively"), ("Laomedeia", "Upbeat"),
+    ("Achernar", "Soft"), ("Despina", "Smooth"), ("Algieba", "Smooth"),
+    ("Iapetus", "Clear"), ("Erinome", "Clear"), ("Umbriel", "Easy-going"),
+    ("Enceladus", "Breathy"), ("Schedar", "Even"), ("Gacrux", "Mature"),
+    ("Orus", "Firm"), ("Fenrir", "Excitable"), ("Rasalgethi", "Informative"),
+    ("Alnilam", "Firm"), ("Pulcherrima", "Forward"), ("Zubenelgenubi", "Casual"),
+    ("Sadaltager", "Knowledgeable"), ("Algenib", "Gravelly"),
+]
+
+
+def gemini_voices() -> list[dict]:
+    """Gemini TTS prebuilt voices for the test-page picker. voice_id == the Gemini
+    voice name (e.g. 'Kore') — passed straight to gemini-3.1-flash-tts-preview."""
+    return [{"voice_id": name, "name": f"{name} — {vibe}",
+             "languages": ["multilingual"]} for name, vibe in GEMINI_VOICES]
+
+
 # --- Schema -----------------------------------------------------------------
 # type: "select" | "number" | "int" | "bool" | "text"
 # select entries carry `choices` = [{"value", "label"}]

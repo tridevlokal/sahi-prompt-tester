@@ -557,12 +557,15 @@ async def run_bot(
 
         # TTS: Gemini 3.1 Flash TTS or the ElevenLabs/Smallest factory.
         if cfg["TTS_PROVIDER"] == "gemini":
+            # The voice picked on the test page (a Gemini voice name like "Kore" /
+            # "Aoede") wins; GEMINI_TTS_VOICE is only the fallback.
+            gvoice = (voice_id or "").strip() or cfg["GEMINI_TTS_VOICE"]
             tts = GeminiFlashTTSService(
                 api_key=gkey, aiohttp_session=http_session,
-                model=cfg["GEMINI_TTS_MODEL"], voice=cfg["GEMINI_TTS_VOICE"],
+                model=cfg["GEMINI_TTS_MODEL"], voice=gvoice,
                 style_prompt=cfg["GEMINI_TTS_STYLE"], sample_rate=OUTPUT_SAMPLE_RATE,
             )
-            logger.info(f"[tts] Gemini {cfg['GEMINI_TTS_MODEL']} voice={cfg['GEMINI_TTS_VOICE']}")
+            logger.info(f"[tts] Gemini {cfg['GEMINI_TTS_MODEL']} voice={gvoice}")
         else:
             tts = _build_tts(cfg, voice_id, speed, http_base, ws_stream_url, http_session)
 

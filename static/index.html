@@ -417,6 +417,12 @@
             id: v.voice_id, voice_id: v.voice_id, name: v.name,
             language: (v.languages || []).join('/'),
           }));
+        } else if (ttsProvider === 'gemini') {
+          const gv = await api('GET', '/api/gemini/voices');
+          voices = gv.map(v => ({
+            id: v.voice_id, voice_id: v.voice_id, name: v.name,
+            language: (v.languages || []).join('/'),
+          }));
         } else {
           voices = await api('GET', '/api/voices');
         }
@@ -430,6 +436,10 @@
         hint.innerHTML = `🔊 TTS: <b>Smallest.ai</b> (lightning-v3.1${smallestLang ? ', lang=' + smallestLang : ''}). ` +
           `Voices below are Smallest voices — all speak Hindi / English / Tamil / Telugu / Kannada / Malayalam. ` +
           `Change voice/language on <a href="/settings" style="color:var(--accent)">Settings</a>.`;
+      } else if (ttsProvider === 'gemini') {
+        hint.innerHTML = `🔊 TTS: <b>Gemini 3.1 Flash</b> (${cfg.GEMINI_TTS_MODEL || ''}) · STT: <b>${cfg.STT_PROVIDER === 'gemini' ? 'Gemini 3.1 Flash' : cfg.STT_PROVIDER}</b>. ` +
+          `Voices below are Google/Gemini voices — pick one, it speaks all languages. ` +
+          `Tune on <a href="/settings" style="color:var(--accent)">Settings</a>.`;
       } else {
         hint.innerHTML = `🔊 TTS: <b>ElevenLabs</b> (${cfg.ELEVENLABS_TTS_MODEL || ''}). ` +
           `Switch provider on <a href="/settings" style="color:var(--accent)">Settings</a>.`;

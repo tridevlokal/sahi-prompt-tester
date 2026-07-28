@@ -185,6 +185,12 @@ async def api_smallest_voices():
     return settings_store.smallest_voices()
 
 
+@app.get("/api/gemini/voices")
+async def api_gemini_voices():
+    """Gemini TTS prebuilt voices (voice_id == Gemini voice name)."""
+    return settings_store.gemini_voices()
+
+
 # ----- WebSocket: voice call -----
 
 @app.websocket("/ws")

@@ -130,10 +130,64 @@ SCHEMA: list[dict[str, Any]] = [
         "choices": [
             {"value": "elevenlabs", "label": "elevenlabs — ElevenLabs (streaming + eleven_v3 HTTP)"},
             {"value": "smallest", "label": "smallest — Smallest.ai Waves (native WebSocket, low latency, Indian langs)"},
+            {"value": "gemini", "label": "gemini — Gemini 3.1 Flash TTS (API key; expressive, multilingual)"},
         ],
         "description": "Which TTS engine synthesises Riya's voice. 'smallest' uses Smallest.ai's "
                        "WebSocket streaming (lightning-v3.1) — natural Hindi/Tamil/Telugu/Kannada/"
-                       "Malayalam at low latency. 'elevenlabs' uses the ElevenLabs settings below.",
+                       "Malayalam at low latency. 'elevenlabs' uses the ElevenLabs settings below. "
+                       "'gemini' uses gemini-3.1-flash-tts-preview via the Gemini API key.",
+    },
+
+    # ---------- STT provider ----------
+    {
+        "key": "STT_PROVIDER",
+        "label": "STT_PROVIDER",
+        "group": "STT provider",
+        "type": "select",
+        "default": "elevenlabs",
+        "choices": [
+            {"value": "elevenlabs", "label": "elevenlabs — ElevenLabs Scribe (realtime WebSocket, low latency)"},
+            {"value": "gemini", "label": "gemini — Gemini 3.1 Flash STT (batch per turn; multilingual, no lang lock)"},
+        ],
+        "description": "Which engine transcribes the learner's speech. 'elevenlabs' = realtime Scribe "
+                       "(lowest latency). 'gemini' sends each utterance to gemini-3.1-flash-lite "
+                       "(Gemini API key) — multilingual, no language lock, but higher latency (batch).",
+    },
+
+    # ---------- Gemini audio (STT/TTS) ----------
+    {
+        "key": "GEMINI_TTS_MODEL",
+        "label": "GEMINI_TTS_MODEL",
+        "group": "Gemini audio",
+        "type": "text",
+        "default": "gemini-3.1-flash-tts-preview",
+        "description": "Gemini TTS model (used when TTS_PROVIDER = gemini).",
+    },
+    {
+        "key": "GEMINI_TTS_VOICE",
+        "label": "GEMINI_TTS_VOICE",
+        "group": "Gemini audio",
+        "type": "text",
+        "default": "Kore",
+        "description": "Gemini prebuilt voice name (e.g. Kore, Puck, Charon, Aoede, Leda). "
+                       "Used when TTS_PROVIDER = gemini.",
+    },
+    {
+        "key": "GEMINI_TTS_STYLE",
+        "label": "GEMINI_TTS_STYLE",
+        "group": "Gemini audio",
+        "type": "text",
+        "default": "",
+        "description": "Optional style instruction prepended to each line, e.g. "
+                       "'Say warmly and encouragingly, like a friendly teacher'. Blank = neutral.",
+    },
+    {
+        "key": "GEMINI_STT_MODEL",
+        "label": "GEMINI_STT_MODEL",
+        "group": "Gemini audio",
+        "type": "text",
+        "default": "gemini-3.1-flash-lite",
+        "description": "Gemini model that transcribes audio (used when STT_PROVIDER = gemini).",
     },
 
     # ---------- TTS (Smallest.ai) ----------

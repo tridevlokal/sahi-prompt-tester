@@ -20,9 +20,10 @@
   "VAD_MIN_VOLUME": 0.3,
   "ALLOW_INTERRUPTIONS": true,
   "INTERRUPT_WORDS": 2,
-  "TTS_PROVIDER": "smallest",
+  "TTS_PROVIDER": "gemini",
   "SMALLEST_LANGUAGE": "te",
   "SMALLEST_VOICE": "padmaja",
   "SMALLEST_MODEL": "lightning-v3.1",
-  "SMALLEST_SPEED": 1.0
+  "SMALLEST_SPEED": 1.0,
+  "STT_PROVIDER": "gemini"
 }

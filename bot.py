@@ -68,6 +68,7 @@ from pipecat.turns.user_stop.speech_timeout_user_turn_stop_strategy import (
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
 
 import settings_store
+from gemini_audio import GeminiFlashSTTService, GeminiFlashTTSService
 
 INPUT_SAMPLE_RATE = 16000
 OUTPUT_SAMPLE_RATE = 24000
@@ -530,17 +531,40 @@ async def run_bot(
         ),
     )
 
-    # An aiohttp session is needed by the ElevenLabs HTTP TTS path (eleven_v3) and
-    # the batch STT path (scribe_v2); create one only when a selected model needs it.
+    # An aiohttp session is needed by the ElevenLabs HTTP TTS path (eleven_v3), the
+    # batch STT path (scribe_v2), and the Gemini STT/TTS services; create one only
+    # when a selected model needs it.
     needs_http = (
         (cfg["TTS_PROVIDER"] == "elevenlabs" and cfg["ELEVENLABS_TTS_MODEL"] == "eleven_v3")
         or cfg["ELEVENLABS_STT_MODEL"] == "scribe_v2"
+        or cfg["TTS_PROVIDER"] == "gemini"
+        or cfg["STT_PROVIDER"] == "gemini"
     )
     http_session = aiohttp.ClientSession() if needs_http else None
 
     try:
-        stt = _build_stt(cfg, http_base, stt_host, http_session)
-        tts = _build_tts(cfg, voice_id, speed, http_base, ws_stream_url, http_session)
+        gkey = os.getenv("GOOGLE_API_KEY")
+
+        # STT: Gemini 3.1 Flash (batch per turn) or ElevenLabs Scribe (realtime).
+        if cfg["STT_PROVIDER"] == "gemini":
+            stt = GeminiFlashSTTService(
+                api_key=gkey, aiohttp_session=http_session,
+                model=cfg["GEMINI_STT_MODEL"], sample_rate=INPUT_SAMPLE_RATE,
+            )
+            logger.info(f"[stt] Gemini {cfg['GEMINI_STT_MODEL']} (batch per turn)")
+        else:
+            stt = _build_stt(cfg, http_base, stt_host, http_session)
+
+        # TTS: Gemini 3.1 Flash TTS or the ElevenLabs/Smallest factory.
+        if cfg["TTS_PROVIDER"] == "gemini":
+            tts = GeminiFlashTTSService(
+                api_key=gkey, aiohttp_session=http_session,
+                model=cfg["GEMINI_TTS_MODEL"], voice=cfg["GEMINI_TTS_VOICE"],
+                style_prompt=cfg["GEMINI_TTS_STYLE"], sample_rate=OUTPUT_SAMPLE_RATE,
+            )
+            logger.info(f"[tts] Gemini {cfg['GEMINI_TTS_MODEL']} voice={cfg['GEMINI_TTS_VOICE']}")
+        else:
+            tts = _build_tts(cfg, voice_id, speed, http_base, ws_stream_url, http_session)
 
         # If the learner pre-picked a language, pin it in the system prompt so Riya
         # reliably opens and stays in it (a seed turn alone drifts to English at

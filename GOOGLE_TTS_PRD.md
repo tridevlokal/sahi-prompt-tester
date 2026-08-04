@@ -100,9 +100,13 @@ session automatically.
 | `GOOGLE_TTS_VOICE_NAME` | dropdown (list in §4) | `Sulafat` | Persona name ONLY. Never a full voice id. |
 | `GOOGLE_TTS_MODEL` | dropdown | `chirp3-hd` | unchanged |
 | `GOOGLE_TTS_SPEED` | float 0.25–2.0 | `1.0` | Chirp3-HD speaking-rate support is limited — verify before relying on non-1.0 values. |
-| `GOOGLE_TTS_FALLBACK_LANGUAGE` | dropdown | `hi-IN` | Used ONLY if a session has no language set. |
 
 Removed: `GOOGLE_TTS_LANGUAGE_CODE`, `GOOGLE_TTS_VOICE` (full id), `GOOGLE_TTS_PITCH`.
+
+> **No language-related admin setting exists at all.** If a session somehow has no
+> language, the code falls back to `"hi-IN"` **hardcoded in the pipeline** (see §5)
+> — deliberately NOT an admin setting, so nobody can ever again "configure" TTS
+> language globally (that's the exact mistake this spec removes).
 
 Dropdown help text (use verbatim):
 
@@ -142,13 +146,13 @@ supported language and reject names missing in any of them.
 
 1. **Delete** `GOOGLE_TTS_LANGUAGE_CODE`, `GOOGLE_TTS_VOICE`, `GOOGLE_TTS_PITCH`
    from settings + all code paths that read them.
-2. **Add** `GOOGLE_TTS_VOICE_NAME` (dropdown, §4) and `GOOGLE_TTS_FALLBACK_LANGUAGE`.
+2. **Add** `GOOGLE_TTS_VOICE_NAME` (dropdown, §4). No other new settings.
 3. **Add** the `GOOGLE_LANG_CODE` map (§2) to the voice pipeline module.
 4. **At session start**, compose the voice id and construct the TTS service:
 
 ```python
 lang_key = session.language                       # "tel", "hin", ...
-code     = GOOGLE_LANG_CODE.get(lang_key) or settings.GOOGLE_TTS_FALLBACK_LANGUAGE
+code     = GOOGLE_LANG_CODE.get(lang_key, "hi-IN")  # hardcoded safety net, NOT a setting
 persona  = settings.GOOGLE_TTS_VOICE_NAME         # "Sulafat"
 voice_id = f"{code}-Chirp3-HD-{persona}"          # e.g. te-IN-Chirp3-HD-Sulafat
 

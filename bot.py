@@ -68,9 +68,23 @@ from pipecat.turns.user_stop.speech_timeout_user_turn_stop_strategy import (
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
 
 import settings_store
-from gemini_audio import GeminiFlashSTTService, GeminiFlashTTSService
+from pipecat.services.sarvam.stt import SarvamSTTService
 from pipecat.services.google.stt import GoogleSTTService
 from pipecat.services.google.tts import GoogleTTSService
+
+
+# Chirp3-HD reads a lowercase standalone "us" as the abbreviation "U.S." ("you-ess"),
+# and it supports no SSML/<sub> to correct it. Cheapest reliable fix: respell just
+# that token as "uss" (same /ʌs/ sound) right before synthesis. Word-boundary +
+# lowercase-only, so "US"/"U.S." (the country), "use", "bus", "discuss" are untouched.
+# TTS input only — captions/LLM context keep the original text.
+_US_FIX = re.compile(r"\bus\b")
+
+
+class GoogleChirpTTSService(GoogleTTSService):
+    async def run_tts(self, text: str, context_id: str):
+        async for frame in super().run_tts(_US_FIX.sub("uss", text), context_id):
+            yield frame
 from pipecat.transcriptions.language import Language
 
 # Picker language code -> Google Cloud Language (STT) + BCP-47 code (Chirp3-HD voice ids).
@@ -550,8 +564,6 @@ async def run_bot(
     needs_http = (
         (cfg["TTS_PROVIDER"] == "elevenlabs" and cfg["ELEVENLABS_TTS_MODEL"] == "eleven_v3")
         or cfg["ELEVENLABS_STT_MODEL"] == "scribe_v2"
-        or cfg["TTS_PROVIDER"] == "gemini"
-        or cfg["STT_PROVIDER"] == "gemini"
     )
     http_session = aiohttp.ClientSession() if needs_http else None
 
@@ -560,49 +572,44 @@ async def run_bot(
         gcreds = os.getenv("GOOGLE_APPLICATION_CREDENTIALS") or "gcp-service-account.json"
         lang_key = (language or "").strip().lower()
 
-        # STT: Google Cloud (realtime), Gemini 3.1 Flash (batch), or ElevenLabs Scribe.
-        if cfg["STT_PROVIDER"] == "google":
+        # STT: Sarvam saaras (Indian codemix), Google Cloud (realtime), or ElevenLabs Scribe.
+        if cfg["STT_PROVIDER"] == "sarvam":
+            stt = SarvamSTTService(
+                api_key=os.getenv("SARVAM_API_KEY"),
+                model=cfg["SARVAM_STT_MODEL"], mode=cfg["SARVAM_STT_MODE"],
+                sample_rate=INPUT_SAMPLE_RATE,
+            )
+            logger.info(f"[stt] Sarvam {cfg['SARVAM_STT_MODEL']} mode={cfg['SARVAM_STT_MODE']}")
+        elif cfg["STT_PROVIDER"] == "google":
             primary = GOOGLE_LANG.get(lang_key, Language.EN_US)
             langs = [primary] if primary == Language.EN_US else [primary, Language.EN_US]
+            # chirp_2 is only served from regional endpoints (verified: us-central1);
+            # latest_long lives on global. Pick the location from the model.
+            gmodel = cfg["GOOGLE_STT_MODEL"]
             stt = GoogleSTTService(
                 credentials_path=gcreds,
-                params=GoogleSTTService.InputParams(languages=langs, model=cfg["GOOGLE_STT_MODEL"]),
+                location="us-central1" if "chirp" in gmodel else "global",
+                params=GoogleSTTService.InputParams(languages=langs, model=gmodel),
                 sample_rate=INPUT_SAMPLE_RATE,
             )
             logger.info(f"[stt] Google Cloud STT langs={[l.value for l in langs]} model={cfg['GOOGLE_STT_MODEL']}")
-        elif cfg["STT_PROVIDER"] == "gemini":
-            stt = GeminiFlashSTTService(
-                api_key=gkey, aiohttp_session=http_session,
-                model=cfg["GEMINI_STT_MODEL"], sample_rate=INPUT_SAMPLE_RATE,
-            )
-            logger.info(f"[stt] Gemini {cfg['GEMINI_STT_MODEL']} (batch per turn)")
         else:
             stt = _build_stt(cfg, http_base, stt_host, http_session)
 
-        # TTS: Google Cloud Chirp3-HD, Gemini 3.1 Flash, or the ElevenLabs/Smallest factory.
+        # TTS: Google Cloud Chirp3-HD or the ElevenLabs factory.
         if cfg["TTS_PROVIDER"] == "google":
             # Chirp3-HD voice id = "<lang>-Chirp3-HD-<VoiceName>"; the picked voice
             # (a Chirp/Gemini name like "Aoede") wins, else GOOGLE_TTS_VOICE.
             vname = (voice_id or "").strip() or cfg["GOOGLE_TTS_VOICE"]
             code = GOOGLE_LANG_CODE.get(lang_key, "en-US")
             gvoice_id = f"{code}-Chirp3-HD-{vname}"
-            tts = GoogleTTSService(
+            tts = GoogleChirpTTSService(
                 credentials_path=gcreds,
                 voice_id=gvoice_id,
                 params=GoogleTTSService.InputParams(language=GOOGLE_LANG.get(lang_key, Language.EN_US)),
                 sample_rate=OUTPUT_SAMPLE_RATE,
             )
             logger.info(f"[tts] Google Cloud TTS voice={gvoice_id}")
-        elif cfg["TTS_PROVIDER"] == "gemini":
-            # The voice picked on the test page (a Gemini voice name like "Kore" /
-            # "Aoede") wins; GEMINI_TTS_VOICE is only the fallback.
-            gvoice = (voice_id or "").strip() or cfg["GEMINI_TTS_VOICE"]
-            tts = GeminiFlashTTSService(
-                api_key=gkey, aiohttp_session=http_session,
-                model=cfg["GEMINI_TTS_MODEL"], voice=gvoice,
-                style_prompt=cfg["GEMINI_TTS_STYLE"], sample_rate=OUTPUT_SAMPLE_RATE,
-            )
-            logger.info(f"[tts] Gemini {cfg['GEMINI_TTS_MODEL']} voice={gvoice}")
         else:
             tts = _build_tts(cfg, voice_id, speed, http_base, ws_stream_url, http_session)
 

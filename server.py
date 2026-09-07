@@ -31,6 +31,14 @@ from bot import run_bot
 
 load_dotenv()
 
+# Hosted deploys (Hugging Face Spaces etc.) can't ship the gitignored service-account
+# file, so accept its JSON via GCP_SERVICE_ACCOUNT_JSON and materialise it on boot.
+_SA_JSON = os.getenv("GCP_SERVICE_ACCOUNT_JSON")
+if _SA_JSON and not os.getenv("GOOGLE_APPLICATION_CREDENTIALS"):
+    _sa_path = Path(__file__).parent / "gcp-service-account.json"
+    _sa_path.write_text(_SA_JSON)
+    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(_sa_path)
+
 BASE_DIR = Path(__file__).parent
 STATIC_DIR = BASE_DIR / "static"
 STATIC_DIR.mkdir(exist_ok=True)
@@ -183,6 +191,12 @@ async def api_update_settings(body: SettingsUpdate):
 async def api_smallest_voices():
     """Curated Smallest.ai voices (all support hi/en/ta/te/kn/ml)."""
     return settings_store.smallest_voices()
+
+
+@app.get("/api/gemini/voices")
+async def api_gemini_voices():
+    """Gemini TTS prebuilt voices (voice_id == Gemini voice name)."""
+    return settings_store.gemini_voices()
 
 
 # ----- WebSocket: voice call -----

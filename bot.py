@@ -68,6 +68,35 @@ from pipecat.turns.user_stop.speech_timeout_user_turn_stop_strategy import (
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
 
 import settings_store
+from pipecat.services.sarvam.stt import SarvamSTTService
+from pipecat.services.google.stt import GoogleSTTService
+from pipecat.services.google.tts import GoogleTTSService
+
+
+# Chirp3-HD reads a lowercase standalone "us" as the abbreviation "U.S." ("you-ess"),
+# and it supports no SSML/<sub> to correct it. Cheapest reliable fix: respell just
+# that token as "uss" (same /ʌs/ sound) right before synthesis. Word-boundary +
+# lowercase-only, so "US"/"U.S." (the country), "use", "bus", "discuss" are untouched.
+# TTS input only — captions/LLM context keep the original text.
+_US_FIX = re.compile(r"\bus\b")
+
+
+class GoogleChirpTTSService(GoogleTTSService):
+    async def run_tts(self, text: str, context_id: str):
+        async for frame in super().run_tts(_US_FIX.sub("uss", text), context_id):
+            yield frame
+from pipecat.transcriptions.language import Language
+
+# Picker language code -> Google Cloud Language (STT) + BCP-47 code (Chirp3-HD voice ids).
+GOOGLE_LANG = {
+    "hin": Language.HI_IN, "tel": Language.TE_IN, "tam": Language.TA_IN,
+    "kan": Language.KN_IN, "mal": Language.ML_IN, "ben": Language.BN_IN,
+    "eng": Language.EN_US,
+}
+GOOGLE_LANG_CODE = {
+    "hin": "hi-IN", "tel": "te-IN", "tam": "ta-IN",
+    "kan": "kn-IN", "mal": "ml-IN", "ben": "bn-IN", "eng": "en-US",
+}
 
 INPUT_SAMPLE_RATE = 16000
 OUTPUT_SAMPLE_RATE = 24000
@@ -94,6 +123,7 @@ _ALLOWED_SCRIPT = re.compile(
     r"ఀ-౿"    # Telugu
     r"ಀ-೿"    # Kannada
     r"ഀ-ൿ"    # Malayalam
+    r"ঀ-৿"    # Bengali
     r"]"
 )
 
@@ -280,7 +310,7 @@ class TranscriptionGate(FrameProcessor):
 # foreign-script gate. Constraining detection to just these keeps true
 # multilingual input while making Russian/CJK impossible. ISO-639-3 in; ElevenLabs
 # normalises on echo (hin→hi, tel→te, …).
-STT_SUPPORTED_LANGS = ["hin", "tel", "tam", "kan", "mal", "eng"]
+STT_SUPPORTED_LANGS = ["hin", "tel", "tam", "kan", "mal", "ben", "eng"]
 STT_PRIMARY_LANG = "hin"  # bias on ambiguous audio; greeting is Hindi-primary
 
 
@@ -456,6 +486,7 @@ LANG_KICKOFF = {
     "tam": "வணக்கம், தமிழில் பேசலாம்.",
     "kan": "ನಮಸ್ಕಾರ, ಕನ್ನಡದಲ್ಲಿ ಮಾತನಾಡೋಣ.",
     "mal": "നമസ്കാരം, മലയാളത്തിൽ സംസാരിക്കാം.",
+    "ben": "নমস্কার, চলুন বাংলায় কথা বলি।",
     "eng": "Hello, let's talk in English.",
 }
 
@@ -464,7 +495,7 @@ LANG_KICKOFF = {
 # English (a bare seed turn drifts at higher temperatures).
 LANG_NAMES = {
     "hin": "Hindi", "tel": "Telugu", "tam": "Tamil",
-    "kan": "Kannada", "mal": "Malayalam", "eng": "English",
+    "kan": "Kannada", "mal": "Malayalam", "ben": "Bengali", "eng": "English",
 }
 
 
@@ -530,8 +561,9 @@ async def run_bot(
         ),
     )
 
-    # An aiohttp session is needed by the ElevenLabs HTTP TTS path (eleven_v3) and
-    # the batch STT path (scribe_v2); create one only when a selected model needs it.
+    # An aiohttp session is needed by the ElevenLabs HTTP TTS path (eleven_v3), the
+    # batch STT path (scribe_v2), and the Gemini STT/TTS services; create one only
+    # when a selected model needs it.
     needs_http = (
         (cfg["TTS_PROVIDER"] == "elevenlabs" and cfg["ELEVENLABS_TTS_MODEL"] == "eleven_v3")
         or cfg["ELEVENLABS_STT_MODEL"] == "scribe_v2"
@@ -539,13 +571,54 @@ async def run_bot(
     http_session = aiohttp.ClientSession() if needs_http else None
 
     try:
-        stt = _build_stt(cfg, http_base, stt_host, http_session)
-        tts = _build_tts(cfg, voice_id, speed, http_base, ws_stream_url, http_session)
+        gkey = os.getenv("GOOGLE_API_KEY")
+        gcreds = os.getenv("GOOGLE_APPLICATION_CREDENTIALS") or "gcp-service-account.json"
+        lang_key = (language or "").strip().lower()
+
+        # STT: Sarvam saaras (Indian codemix), Google Cloud (realtime), or ElevenLabs Scribe.
+        if cfg["STT_PROVIDER"] == "sarvam":
+            stt = SarvamSTTService(
+                api_key=os.getenv("SARVAM_API_KEY"),
+                model=cfg["SARVAM_STT_MODEL"], mode=cfg["SARVAM_STT_MODE"],
+                sample_rate=INPUT_SAMPLE_RATE,
+            )
+            logger.info(f"[stt] Sarvam {cfg['SARVAM_STT_MODEL']} mode={cfg['SARVAM_STT_MODE']}")
+        elif cfg["STT_PROVIDER"] == "google":
+            primary = GOOGLE_LANG.get(lang_key, Language.EN_US)
+            langs = [primary] if primary == Language.EN_US else [primary, Language.EN_US]
+            # chirp_2 is only served from regional endpoints (verified: us-central1);
+            # latest_long lives on global. Pick the location from the model.
+            gmodel = cfg["GOOGLE_STT_MODEL"]
+            stt = GoogleSTTService(
+                credentials_path=gcreds,
+                location="us-central1" if "chirp" in gmodel else "global",
+                params=GoogleSTTService.InputParams(languages=langs, model=gmodel),
+                sample_rate=INPUT_SAMPLE_RATE,
+            )
+            logger.info(f"[stt] Google Cloud STT langs={[l.value for l in langs]} model={cfg['GOOGLE_STT_MODEL']}")
+        else:
+            stt = _build_stt(cfg, http_base, stt_host, http_session)
+
+        # TTS: Google Cloud Chirp3-HD or the ElevenLabs factory.
+        if cfg["TTS_PROVIDER"] == "google":
+            # Chirp3-HD voice id = "<lang>-Chirp3-HD-<VoiceName>"; the picked voice
+            # (a Chirp/Gemini name like "Aoede") wins, else GOOGLE_TTS_VOICE.
+            vname = (voice_id or "").strip() or cfg["GOOGLE_TTS_VOICE"]
+            code = GOOGLE_LANG_CODE.get(lang_key, "en-US")
+            gvoice_id = f"{code}-Chirp3-HD-{vname}"
+            tts = GoogleChirpTTSService(
+                credentials_path=gcreds,
+                voice_id=gvoice_id,
+                params=GoogleTTSService.InputParams(language=GOOGLE_LANG.get(lang_key, Language.EN_US)),
+                sample_rate=OUTPUT_SAMPLE_RATE,
+            )
+            logger.info(f"[tts] Google Cloud TTS voice={gvoice_id}")
+        else:
+            tts = _build_tts(cfg, voice_id, speed, http_base, ws_stream_url, http_session)
 
         # If the learner pre-picked a language, pin it in the system prompt so Riya
         # reliably opens and stays in it (a seed turn alone drifts to English at
         # higher temperatures).
-        lang_key = (language or "").strip().lower()
         effective_prompt = system_prompt + _language_directive(lang_key)
 
         llm = GoogleLLMService(

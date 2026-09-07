@@ -18,6 +18,11 @@ COPY server.py bot.py storage.py settings_store.py ./
 COPY static/ ./static/
 COPY data/ ./data/
 
+# Hugging Face Spaces runs the container as uid 1000; the app writes data/*.json
+# and the materialised service-account file, so hand /app to that user.
+RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
+USER appuser
+
 # fly.io routes to internal_port; bind all interfaces.
 ENV HOST=0.0.0.0 \
     PORT=8080 \

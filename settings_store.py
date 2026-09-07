@@ -77,6 +77,28 @@ def smallest_voices() -> list[dict]:
     return [dict(v) for v in SMALLEST_VOICES]
 
 
+# Gemini TTS prebuilt voices (name + vibe from Google docs). Tutor-friendly first.
+GEMINI_VOICES = [
+    ("Achird", "Friendly"), ("Sulafat", "Warm"), ("Aoede", "Breezy"),
+    ("Leda", "Youthful"), ("Callirhoe", "Easy-going"), ("Vindemiatrix", "Gentle"),
+    ("Kore", "Firm"), ("Puck", "Upbeat"), ("Autonoe", "Bright"), ("Zephyr", "Bright"),
+    ("Charon", "Informative"), ("Sadachbia", "Lively"), ("Laomedeia", "Upbeat"),
+    ("Achernar", "Soft"), ("Despina", "Smooth"), ("Algieba", "Smooth"),
+    ("Iapetus", "Clear"), ("Erinome", "Clear"), ("Umbriel", "Easy-going"),
+    ("Enceladus", "Breathy"), ("Schedar", "Even"), ("Gacrux", "Mature"),
+    ("Orus", "Firm"), ("Fenrir", "Excitable"), ("Rasalgethi", "Informative"),
+    ("Alnilam", "Firm"), ("Pulcherrima", "Forward"), ("Zubenelgenubi", "Casual"),
+    ("Sadaltager", "Knowledgeable"), ("Algenib", "Gravelly"),
+]
+
+
+def gemini_voices() -> list[dict]:
+    """Gemini TTS prebuilt voices for the test-page picker. voice_id == the Gemini
+    voice name (e.g. 'Kore') — passed straight to gemini-3.1-flash-tts-preview."""
+    return [{"voice_id": name, "name": f"{name} — {vibe}",
+             "languages": ["multilingual"]} for name, vibe in GEMINI_VOICES]
+
+
 # --- Schema -----------------------------------------------------------------
 # type: "select" | "number" | "int" | "bool" | "text"
 # select entries carry `choices` = [{"value", "label"}]
@@ -129,65 +151,80 @@ SCHEMA: list[dict[str, Any]] = [
         "default": "elevenlabs",
         "choices": [
             {"value": "elevenlabs", "label": "elevenlabs — ElevenLabs (streaming + eleven_v3 HTTP)"},
-            {"value": "smallest", "label": "smallest — Smallest.ai Waves (native WebSocket, low latency, Indian langs)"},
+            {"value": "google", "label": "google — Google Cloud TTS Chirp3-HD (service account; realtime, HD Indian voices)"},
         ],
-        "description": "Which TTS engine synthesises Riya's voice. 'smallest' uses Smallest.ai's "
-                       "WebSocket streaming (lightning-v3.1) — natural Hindi/Tamil/Telugu/Kannada/"
-                       "Malayalam at low latency. 'elevenlabs' uses the ElevenLabs settings below.",
+        "description": "Which TTS engine synthesises Riya's voice. 'elevenlabs' uses the ElevenLabs "
+                       "settings below (streaming WS; eleven_v3 via HTTP). 'google' uses Cloud TTS "
+                       "Chirp3-HD — voice id composed per session language, ~0.2s first audio.",
     },
 
-    # ---------- TTS (Smallest.ai) ----------
+    # ---------- STT provider ----------
     {
-        "key": "SMALLEST_MODEL",
-        "label": "SMALLEST_MODEL",
-        "group": "TTS (Smallest.ai)",
+        "key": "STT_PROVIDER",
+        "label": "STT_PROVIDER",
+        "group": "STT provider",
         "type": "select",
-        "default": "lightning-v3.1",
+        "default": "elevenlabs",
         "choices": [
-            {"value": "lightning-v3.1", "label": "lightning-v3.1 — latest conversational, 15 languages (recommended)"},
-            {"value": "lightning-v2", "label": "lightning-v2 — previous gen (supports consistency/similarity/enhancement)"},
+            {"value": "elevenlabs", "label": "elevenlabs — ElevenLabs Scribe (realtime WebSocket, low latency)"},
+            {"value": "sarvam", "label": "sarvam — Sarvam saaras (Indian codemix, native script; best Telugu accuracy)"},
+            {"value": "google", "label": "google — Google Cloud STT (service account; realtime, low latency)"},
         ],
-        "description": "Smallest.ai Waves model (used only when TTS_PROVIDER = smallest). "
-                       "lightning-v3.1 is the newest conversational model with mid-sentence "
-                       "language switching.",
+        "description": "Which engine transcribes the learner's speech. 'elevenlabs' = realtime Scribe "
+                       "(lowest latency, ~50ms). 'sarvam' = saaras codemix — best Indian-language "
+                       "accuracy, native script (~300-500ms batch). 'google' = Cloud STT streaming.",
+    },
+
+    # ---------- Sarvam STT ----------
+    {
+        "key": "SARVAM_STT_MODEL",
+        "label": "SARVAM_STT_MODEL",
+        "group": "STT (Sarvam)",
+        "type": "select",
+        "default": "saaras:v3",
+        "choices": [
+            {"value": "saaras:v3", "label": "saaras:v3 — best quality, codemix support (recommended)"},
+            {"value": "saarika:v2.5", "label": "saarika:v2.5 — faster, needs explicit language"},
+        ],
+        "description": "Sarvam speech-to-text model (used when STT_PROVIDER = sarvam). saaras:v3 "
+                       "auto-detects language and handles Hindi/Telugu + English codemix in native "
+                       "script — best Indian accuracy in our tests.",
     },
     {
-        "key": "SMALLEST_VOICE",
-        "label": "SMALLEST_VOICE",
-        "group": "TTS (Smallest.ai)",
+        "key": "SARVAM_STT_MODE",
+        "label": "SARVAM_STT_MODE",
+        "group": "STT (Sarvam)",
+        "type": "select",
+        "default": "codemix",
+        "choices": [
+            {"value": "codemix", "label": "codemix — Hindi/Telugu + English mixed speech (recommended)"},
+            {"value": "transcribe", "label": "transcribe — standard single-language"},
+            {"value": "verbatim", "label": "verbatim — exact transcription, no normalisation"},
+        ],
+        "description": "Sarvam transcription mode (saaras:v3 only). codemix handles mixed "
+                       "Indian-language + English speech without specifying a language.",
+    },
+
+    # ---------- Google Cloud audio (service account) ----------
+    {
+        "key": "GOOGLE_TTS_VOICE",
+        "label": "GOOGLE_TTS_VOICE",
+        "group": "Google Cloud audio",
         "type": "text",
-        "default": "anitha",
-        "description": "Smallest.ai voice_id (used only when TTS_PROVIDER = smallest; overrides the "
-                       "picked ElevenLabs voice). Telugu-capable female voices: anitha, shruthi, "
-                       "padmaja, chandana, sandhya, lavanya, nandini. Male: raju, shrihari, jeevan.",
+        "default": "Aoede",
+        "description": "Chirp3-HD voice NAME (e.g. Aoede, Charon, Kore, Achird). The final "
+                       "voice id is built as '<lang>-Chirp3-HD-<name>' from the picked language. "
+                       "Used when TTS_PROVIDER = google.",
     },
     {
-        "key": "SMALLEST_LANGUAGE",
-        "label": "SMALLEST_LANGUAGE",
-        "group": "TTS (Smallest.ai)",
-        "type": "select",
-        "default": "hi",
-        "choices": [
-            {"value": "hi", "label": "hi — Hindi (handles Hindi+English code-mix well)"},
-            {"value": "te", "label": "te — Telugu"},
-            {"value": "ta", "label": "ta — Tamil"},
-            {"value": "kn", "label": "kn — Kannada"},
-            {"value": "ml", "label": "ml — Malayalam"},
-            {"value": "mr", "label": "mr — Marathi"},
-            {"value": "gu", "label": "gu — Gujarati"},
-            {"value": "en", "label": "en — English"},
-        ],
-        "description": "Language sent to Smallest.ai (REQUIRED — the API rejects an empty language). "
-                       "lightning-v3.1 still auto-switches mid-sentence, but this sets the primary "
-                       "language. For a Telugu tutor pick 'te'; for Hindi-English code-mix pick 'hi'.",
-    },
-    {
-        "key": "SMALLEST_SPEED",
-        "label": "SMALLEST_SPEED",
-        "group": "TTS (Smallest.ai)",
-        "type": "number", "min": 0.5, "max": 2.0, "step": 0.05,
-        "default": 1.0,
-        "description": "Smallest.ai speaking speed multiplier. Range 0.5-2.0. 1.0 = normal.",
+        "key": "GOOGLE_STT_MODEL",
+        "label": "GOOGLE_STT_MODEL",
+        "group": "Google Cloud audio",
+        "type": "text",
+        "default": "chirp_2",
+        "description": "Google Cloud STT model (used when STT_PROVIDER = google). chirp_2 = "
+                       "multilingual incl. Telugu, streaming (us-central1). latest_long does NOT "
+                       "support Telugu — avoid for Indian languages.",
     },
 
     # ---------- TTS (ElevenLabs) ----------
@@ -326,6 +363,7 @@ SCHEMA: list[dict[str, Any]] = [
             {"value": "tam", "label": "tam — lock Tamil only"},
             {"value": "kan", "label": "kan — lock Kannada only"},
             {"value": "mal", "label": "mal — lock Malayalam only"},
+            {"value": "ben", "label": "ben — lock Bengali only"},
             {"value": "eng", "label": "eng — lock English only"},
         ],
         "description": "STT language for ElevenLabs Scribe. 'auto' recognises ALL Indian languages "

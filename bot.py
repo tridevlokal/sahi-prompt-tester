@@ -15,6 +15,7 @@ both ElevenLabs now.
 
 import json
 import os
+from pathlib import Path
 import re
 import time
 
@@ -499,6 +500,27 @@ LANG_NAMES = {
 }
 
 
+# Production-style per-language prompt blocks. Prompts written for production carry a
+# `{language_block}` placeholder; we fill it from data/language_blocks/call_<xx>.txt
+# (copied from sahi-english apps/prompts/language_blocks.py) so the same prompt text
+# behaves here as it does in the app. Unmapped/absent language -> English block, exactly
+# like production's LANGUAGE_BLOCK_EN fallback.
+_LANGUAGE_BLOCK_DIR = Path(__file__).parent / "data" / "language_blocks"
+_LANGUAGE_BLOCK_FILE = {"hin": "hi", "tel": "te", "tam": "ta", "kan": "kn"}
+
+
+def _apply_language_block(prompt: str, lang_key: str) -> str:
+    if "{language_block}" not in prompt:
+        return prompt
+    code = _LANGUAGE_BLOCK_FILE.get(lang_key, "en")
+    path = _LANGUAGE_BLOCK_DIR / f"call_{code}.txt"
+    if not path.exists():
+        path = _LANGUAGE_BLOCK_DIR / "call_en.txt"
+    block = path.read_text().strip()
+    logger.info(f"[prompt] language_block <- {path.name}")
+    return prompt.replace("{language_block}", block)
+
+
 def _language_directive(lang_key: str) -> str:
     """A short instruction appended to the system prompt when the learner has
     pre-picked a language, forcing Riya to open and continue in it."""
@@ -619,7 +641,7 @@ async def run_bot(
         # If the learner pre-picked a language, pin it in the system prompt so Riya
         # reliably opens and stays in it (a seed turn alone drifts to English at
         # higher temperatures).
-        effective_prompt = system_prompt + _language_directive(lang_key)
+        effective_prompt = _apply_language_block(system_prompt, lang_key) + _language_directive(lang_key)
 
         llm = GoogleLLMService(
             api_key=os.getenv("GOOGLE_API_KEY"),

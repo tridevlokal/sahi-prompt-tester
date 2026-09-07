@@ -1,5 +1,5 @@
 {
-  "GEMINI_MODEL": "gemini-2.5-flash-lite",
+  "GEMINI_MODEL": "gemini-3.1-flash-lite",
   "GEMINI_TEMPERATURE": 0.8,
   "ELEVENLABS_TTS_USE_SPEAKER_BOOST": true,
   "GEMINI_MAX_TOKENS": 500,
@@ -31,5 +31,7 @@
   "GEMINI_TTS_STYLE": "",
   "GEMINI_STT_MODEL": "gemini-3.1-flash-lite",
   "GOOGLE_TTS_VOICE": "Aoede",
-  "GOOGLE_STT_MODEL": "chirp_2"
+  "GOOGLE_STT_MODEL": "chirp_2",
+  "SARVAM_STT_MODEL": "saaras:v3",
+  "SARVAM_STT_MODE": "codemix"
 }

@@ -363,6 +363,7 @@ SCHEMA: list[dict[str, Any]] = [
             {"value": "tam", "label": "tam — lock Tamil only"},
             {"value": "kan", "label": "kan — lock Kannada only"},
             {"value": "mal", "label": "mal — lock Malayalam only"},
+            {"value": "ben", "label": "ben — lock Bengali only"},
             {"value": "eng", "label": "eng — lock English only"},
         ],
         "description": "STT language for ElevenLabs Scribe. 'auto' recognises ALL Indian languages "

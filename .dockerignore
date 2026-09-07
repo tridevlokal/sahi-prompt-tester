@@ -9,4 +9,9 @@ __pycache__/
 **/.DS_Store
 .claude/
 *.md
+!README.md
 scratchpad/
+scratchpad_*
+*.log
+*.docx
+gcp-service-account.json

@@ -90,11 +90,12 @@ from pipecat.transcriptions.language import Language
 # Picker language code -> Google Cloud Language (STT) + BCP-47 code (Chirp3-HD voice ids).
 GOOGLE_LANG = {
     "hin": Language.HI_IN, "tel": Language.TE_IN, "tam": Language.TA_IN,
-    "kan": Language.KN_IN, "mal": Language.ML_IN, "eng": Language.EN_US,
+    "kan": Language.KN_IN, "mal": Language.ML_IN, "ben": Language.BN_IN,
+    "eng": Language.EN_US,
 }
 GOOGLE_LANG_CODE = {
     "hin": "hi-IN", "tel": "te-IN", "tam": "ta-IN",
-    "kan": "kn-IN", "mal": "ml-IN", "eng": "en-US",
+    "kan": "kn-IN", "mal": "ml-IN", "ben": "bn-IN", "eng": "en-US",
 }
 
 INPUT_SAMPLE_RATE = 16000
@@ -122,6 +123,7 @@ _ALLOWED_SCRIPT = re.compile(
     r"ఀ-౿"    # Telugu
     r"ಀ-೿"    # Kannada
     r"ഀ-ൿ"    # Malayalam
+    r"ঀ-৿"    # Bengali
     r"]"
 )
 
@@ -308,7 +310,7 @@ class TranscriptionGate(FrameProcessor):
 # foreign-script gate. Constraining detection to just these keeps true
 # multilingual input while making Russian/CJK impossible. ISO-639-3 in; ElevenLabs
 # normalises on echo (hin→hi, tel→te, …).
-STT_SUPPORTED_LANGS = ["hin", "tel", "tam", "kan", "mal", "eng"]
+STT_SUPPORTED_LANGS = ["hin", "tel", "tam", "kan", "mal", "ben", "eng"]
 STT_PRIMARY_LANG = "hin"  # bias on ambiguous audio; greeting is Hindi-primary
 
 
@@ -484,6 +486,7 @@ LANG_KICKOFF = {
     "tam": "வணக்கம், தமிழில் பேசலாம்.",
     "kan": "ನಮಸ್ಕಾರ, ಕನ್ನಡದಲ್ಲಿ ಮಾತನಾಡೋಣ.",
     "mal": "നമസ്കാരം, മലയാളത്തിൽ സംസാരിക്കാം.",
+    "ben": "নমস্কার, চলুন বাংলায় কথা বলি।",
     "eng": "Hello, let's talk in English.",
 }
 
@@ -492,7 +495,7 @@ LANG_KICKOFF = {
 # English (a bare seed turn drifts at higher temperatures).
 LANG_NAMES = {
     "hin": "Hindi", "tel": "Telugu", "tam": "Tamil",
-    "kan": "Kannada", "mal": "Malayalam", "eng": "English",
+    "kan": "Kannada", "mal": "Malayalam", "ben": "Bengali", "eng": "English",
 }
 
 

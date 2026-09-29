@@ -1,6 +1,6 @@
 # PRD — "Cheap Stack": Sarvam Bulbul TTS + Groq Whisper STT + Gemini Flash-Lite
 
-**Branch:** `feat/sarvam-cheap-stack` · **Status:** Draft · **Date:** 10 Sep 2026
+**Branch:** `feat/sarvam-cheap-stack` · **Status:** Phase 1 built, first measurements in §10 · **Date:** 10 Sep 2026
 **Owner:** Tridev · **Repo:** sahi-prompt-tester (this app is Phase 1 test bench; production bridge is Phase 2)
 
 ---
@@ -27,6 +27,11 @@ production Exotel bridge.
 
 Note: `gemini-2.5-flash-lite` retires 16 Oct 2026 → repo already defaults to
 `gemini-3.1-flash-lite`; budget with 3.1 rates ($0.25/$1.50 → total ~₹1.0/min).
+
+> **Superseded by §10 (10 Sep test run):** Sarvam has retired `bulbul:v2` — its API
+> rejects v2 requests — so the ₹15/10K rate is gone; v3 is ₹30/10K. Groq turbo garbles
+> Telugu, so the default is `whisper-large-v3` ($0.111/hr). Measured cost on short test
+> calls was ₹1.2–2.1/min, not ₹0.80.
 
 ---
 
@@ -204,3 +209,85 @@ voices after a quick listen, mark the rest hidden.
 | D2 | Voice seeds + language matrix pass on hi/te; ghost-text guard |
 | D3 | ta/kn tuning + cost meter + latency numbers |
 | D4 | Cloud Run deploy, team A/B, decision-gate readout |
+
+---
+
+## 10. Findings — first build + test run (10 Sep 2026)
+
+**What was built:** `TTS_PROVIDER=sarvam` (Bulbul v3, streaming WS) and `STT_PROVIDER=groq`
+(Whisper, segmented) in `bot.py`; Sarvam voice picker on the call page; Whisper ghost-text
+filter in the gate; per-call cost + latency meter (shown under the call, logged as
+`[cost]` / `[latency]` / `[ttfb]`); `/voice-lab` page (render one line across voices, blind
+A/B rating, mic → Whisper). Tests: automated end-to-end WebSocket calls (Sarvam-rendered
+"user" speech in, Riya audio out) plus direct API probes.
+
+### Changes from the original plan
+
+| Plan said | Reality | Change made |
+|---|---|---|
+| `bulbul:v2` at ₹15/10K chars | v2 retired: API returns 400 "use bulbul:v3"; v3 = ₹30/10K ([pricing](https://docs.sarvam.ai/api-reference-docs/pricing)) | v3 only; pitch/loudness settings removed; one rate key |
+| Groq turbo is enough | Telugu clip: turbo garbled most words, and with no language hint wrote it in **Gujarati script** (dropped by the script gate → user speech lost). large-v3 ≈ saaras | Default `whisper-large-v3` |
+| Groq STT adds 100–300 ms | Direct call from Mac: turbo ~250 ms warm (3 s Hindi), large-v3 ~490 ms (4 s Telugu); first call in a call ~600 ms cold | — |
+| Bulbul reads mixed text fine | Pure English and codemix are fine, but on the WebSocket Sarvam re-chunks quoted lines ("బోలిఏ: 'I go…'") and rejects the leftover `'` → "must contain at least one character from the allowed languages", one error per quoted line (direct repro: 1 error quoted, 0 with quotes stripped; no clear audio loss) | Strip quotes at word boundaries before sending (apostrophes in I'm/don't kept) |
+
+### Telugu STT accuracy (same clip, truth: నా పేరు రాహుల్. నేను రోజూ ఉదయం తొమ్మిది గంటలకు office కి వెళ్తాను.)
+
+| Engine | Output |
+|---|---|
+| Groq turbo, hint te | నా పేరు రాహుల నేను రోజు ఉదేయం తొమ్ిది గంటలకు అఉఫిస్ కి వల్తాను |
+| Groq turbo, auto | ના પેરુ રાહુલ … (Gujarati script) |
+| Groq large-v3, hint te | నా పేరు రాహుల్. నేను రోజు ఉదేయం తొమ్మిది గంటలకు ఓఫిస్ కి వేళ్తాను. |
+| Sarvam saaras:v3 | నా పేరు రాహుల్, నేను రోజు ఉదయం తొమ్మిది గంటలకు ఆఫీస్కి వెళ్తాను. |
+
+### End-to-end calls (Mac → local server; Gemini 3.1 flash-lite, 3.4K-token prompt)
+
+| Run | Latency (VAD end → Riya audio) | Breakdown | Cost | Ghost text in 6 s silence |
+|---|---|---|---|---|
+| Hindi, Groq turbo | 3.18 s (cold) | STT 1.66 · LLM 0.99 · TTS 0.26 | ₹2.09/min | 0 (test-harness miscount fixed) |
+| Telugu, Groq turbo | 2.41 s | STT 0.88 · LLM 0.95 · TTS 0.25 | ₹1.23/min | 0 |
+| Telugu, Sarvam saaras | 2.50 s | STT 0.73 · LLM 1.01 · TTS 0.31 | STT not priced | 0 |
+
+STT TTFB includes the 0.5 s `VAD_STOP_SECS` wait. Samples are single short calls — directional, not a measurement.
+
+### What this means for the decision gate
+
+- **Cost:** TTS at v3 runs ~₹1.5–1.8/min when Riya talks ~500–600 chars/min, and LLM is
+  ~₹0.08 **per turn** because the 3.4K-token prompt is re-sent each turn. Realistic total
+  ≈ **₹1.5–2/min** — misses the ≤₹1 target, but is still ~75–80% below ₹7–9.
+- **Latency:** ~2.4 s, not ≤1.5 s. Groq and Saaras land within 0.1 s of each other; the big
+  levers are provider-agnostic: `VAD_STOP_SECS` 0.5 → 0.3, and Gemini TTFB (~1 s; prompt
+  size / context caching).
+- **STT choice:** at large-v3 pricing plus the 10 s billing floor, Groq's cost edge over
+  Saaras mostly disappears, and Saaras is already integrated and best on Telugu.
+- **Open:** voice quality (team blind A/B in `/voice-lab`) is untested. The
+  ElevenLabs keys in `.env` are rejected by the global, India and EU endpoints, so the
+  ElevenLabs side of the A/B needs a working key.
+- **Needs an owner decision:** keep ≤₹1/min as the gate (→ likely no-go), or re-set it
+  to ~₹2/min.
+
+---
+
+## 11. Direction change — TTS on Google Chirp3-HD (22 Sep 2026)
+
+Owner decision: build the cheaper stack on **Google Cloud TTS Chirp3-HD** (`TTS_PROVIDER=google`,
+already in the repo) instead of Sarvam Bulbul. Sarvam stays wired as an option.
+
+**Changes:** cost meter prices Chirp3-HD ($30 / 1M chars) and Sarvam saaras STT (₹30/hr, on
+call length — upper bound, since the mic is streamed the whole call); Voice Lab renders
+Chirp3-HD for A/B; fixed picker voice `Callirhoe` → `Callirrhoe` (the old spelling failed
+the call). All 30 Chirp3-HD voices exist for hi-IN, te-IN, ta-IN, kn-IN and en-IN.
+
+**End-to-end calls (Chirp3-HD Aoede + Sarvam saaras STT, Gemini 3.1 flash-lite):**
+
+| Run | STT transcript | Latency | Breakdown | Cost | Ghost / TTS errors |
+|---|---|---|---|---|---|
+| Telugu | exact | 2.33 s | STT 0.75 · LLM 0.84 · TTS 0.17 | ₹1.97/min | 0 / 0 |
+| Hindi | exact | 2.55 s | STT 0.70 · LLM 1.11 · TTS 0.14 | ₹2.61/min | 0 / 0 |
+
+Estimated 1-min call at 550 chars + 5 turns: **₹2.37/min** (TTS ₹1.45 · STT ≤₹0.50 · LLM ₹0.41).
+Chirp costs about the same as Bulbul v3 (≈₹26 vs ₹30 per 10K chars), reads quoted English
+without errors, and is ~0.1 s faster to first audio.
+
+**Next levers (provider-agnostic):** shorter Riya replies (TTS cost scales with chars — the
+Hindi reply ran ~680 chars/min); `VAD_STOP_SECS` 0.5 → 0.3; Gemini context caching for the
+3.4K-token prompt; confirm saaras billing on the Sarvam dashboard.

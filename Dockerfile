@@ -14,7 +14,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # App code + saved prompts/voices/settings.
-COPY server.py bot.py storage.py settings_store.py ./
+COPY server.py bot.py storage.py settings_store.py gemini_audio.py ./
 COPY static/ ./static/
 COPY data/ ./data/
 

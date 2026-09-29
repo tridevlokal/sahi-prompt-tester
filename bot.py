@@ -13,8 +13,10 @@ the pipeline without a code change. Sarvam has been removed — STT and TTS are
 both ElevenLabs now.
 """
 
+import asyncio
 import json
 import os
+import random
 from pathlib import Path
 import re
 import time
@@ -27,11 +29,20 @@ from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
+    OutputAudioRawFrame,
+    UserStartedSpeakingFrame,
+    UserStoppedSpeakingFrame,
+    VADUserStartedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
     InterimTranscriptionFrame,
     LLMRunFrame,
     LLMTextFrame,
+    MetricsFrame,
     TranscriptionFrame,
 )
+from pipecat.metrics.metrics import LLMUsageMetricsData, TTFBMetricsData, TTSUsageMetricsData
+from pipecat.observers.base_observer import BaseObserver, FramePushed
+from pipecat.observers.user_bot_latency_observer import UserBotLatencyObserver
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -69,7 +80,11 @@ from pipecat.turns.user_stop.speech_timeout_user_turn_stop_strategy import (
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
 
 import settings_store
+from gemini_audio import GeminiFlashTTSService, GeminiInteractionsTTSService
 from pipecat.services.sarvam.stt import SarvamSTTService
+from pipecat.services.sarvam.tts import SarvamTTSService
+from pipecat.services.groq.stt import GroqSTTService
+from pipecat.services.groq.llm import GroqLLMService, GroqLLMSettings
 from pipecat.services.google.stt import GoogleSTTService
 from pipecat.services.google.tts import GoogleTTSService
 
@@ -139,6 +154,16 @@ def _is_foreign_garbage(text: str) -> bool:
         return False
     allowed = sum(1 for c in letters if _ALLOWED_SCRIPT.match(c))
     return allowed / len(letters) < 0.6
+
+
+# Whisper (Groq STT) invents YouTube-outro text on silence/noise that slips past VAD.
+# Only multi-word phrases no learner says to Riya on a call — a bare "thank you" is
+# real speech and stays.
+_GHOST_TEXT = re.compile(
+    r"thank(s| you) for watching|please subscribe|like and subscribe|subscribe to (my|our|the) channel"
+    r"|subtitles? by|amara\.org|सब्सक्राइब|देखने के लिए धन्यवाद",
+    re.IGNORECASE,
+)
 
 
 class SmallestFixedLangTTSService(SmallestTTSService):
@@ -238,6 +263,212 @@ class TranscriptionLogger(FrameProcessor):
         await self.push_frame(frame, direction)
 
 
+# ---------------------------------------------------------------------------
+# Backchannel: the little "hmm / अच्छा / हाँ हाँ" a real Indian listener makes while
+# the other person is still talking. Short clips are synthesised once per
+# (language, voice) with Chirp3-HD and cached; while the learner speaks we play one
+# every few seconds at reduced gain. They go out as plain OutputAudioRawFrame, which
+# pipecat does NOT count as bot speech, so turn-taking, captions, interruption logic
+# and the STT gate are untouched. Browser echo cancellation keeps them out of the mic.
+BACKCHANNEL_TEXTS = {
+    # Word fillers (synthesised per language). Hums come from the recorded clips in
+    # data/backchannel/custom/*.mp3 and are used for every language.
+    "hin": ["अच्छा", "ओके", "ठीक है"],
+    "tel": ["సరే", "ఓకే", "అవును"],
+    "tam": ["சரி", "ஓகே", "ஆமா"],
+    "kan": ["ಸರಿ", "ಓಕೆ", "ಹೌದು"],
+    "mal": ["ശരി", "ഓകെ", "അതെ"],
+    "ben": ["আচ্ছা", "ওকে", "ঠিক আছে"],
+    "eng": ["okay", "right", "I see"],
+}
+_BACKCHANNEL_CUSTOM_DIR = Path(__file__).parent / "data" / "backchannel" / "custom"
+
+
+def _load_custom_hums() -> list[bytes]:
+    """Decode the recorded hum clips (mp3/wav) to PCM16 24 kHz mono, cached as .pcm."""
+    clips = []
+    if not _BACKCHANNEL_CUSTOM_DIR.exists():
+        return clips
+    for src in sorted(_BACKCHANNEL_CUSTOM_DIR.iterdir()):
+        if src.suffix.lower() not in (".mp3", ".wav", ".m4a", ".ogg"):
+            continue
+        cache = src.with_suffix(".pcm")
+        if cache.exists() and cache.stat().st_mtime >= src.stat().st_mtime:
+            clips.append(cache.read_bytes()); continue
+        import av
+        container = av.open(str(src))
+        res = av.AudioResampler(format="s16", layout="mono", rate=OUTPUT_SAMPLE_RATE)
+        pcm = bytearray()
+        for frame in container.decode(container.streams.audio[0]):
+            for rf in res.resample(frame):
+                pcm += rf.to_ndarray().tobytes()
+        pcm = _trim_silence(bytes(pcm))
+        cache.write_bytes(pcm); clips.append(pcm)
+    return clips
+_BACKCHANNEL_DIR = Path(__file__).parent / "data" / "backchannel"
+
+
+def _synth_backchannel_clips(lang_key: str, voice: str, credentials_path: str) -> tuple[list[bytes], list[bytes]]:
+    """Blocking: return PCM16 24 kHz clips for every filler of the language, from disk
+    cache or Chirp3-HD. Runs in a worker thread at session start."""
+    from google.cloud import texttospeech as gtts
+    from google.oauth2 import service_account
+    code = GOOGLE_LANG_CODE.get(lang_key, "en-IN" if lang_key == "eng" else "hi-IN")
+    texts = BACKCHANNEL_TEXTS.get(lang_key) or BACKCHANNEL_TEXTS["eng"]
+    _BACKCHANNEL_DIR.mkdir(parents=True, exist_ok=True)
+    clips, client = [], None
+    for i, text in enumerate(texts):
+        path = _BACKCHANNEL_DIR / f"{lang_key}_{voice}_{i}.pcm"
+        if path.exists():
+            clips.append(path.read_bytes()); continue
+        if client is None:
+            creds = service_account.Credentials.from_service_account_file(credentials_path)
+            client = gtts.TextToSpeechClient(credentials=creds)
+        r = client.synthesize_speech(
+            input=gtts.SynthesisInput(text=text),
+            voice=gtts.VoiceSelectionParams(language_code=code, name=f"{code}-Chirp3-HD-{voice}"),
+            audio_config=gtts.AudioConfig(audio_encoding=gtts.AudioEncoding.LINEAR16,
+                                          sample_rate_hertz=OUTPUT_SAMPLE_RATE),
+        )
+        pcm = r.audio_content[44:] if r.audio_content[:4] == b"RIFF" else r.audio_content
+        pcm = _trim_silence(pcm)
+        path.write_bytes(pcm); clips.append(pcm)
+    return _load_custom_hums(), clips
+
+
+def _trim_silence(pcm: bytes, thresh: float = 0.02, pad_ms: int = 60) -> bytes:
+    """Cut Chirp's leading/trailing silence so a filler lands tight on the pause."""
+    import numpy as np
+    x = np.frombuffer(pcm, dtype=np.int16)
+    loud = np.flatnonzero(np.abs(x.astype(np.int32)) > thresh * 32767)
+    if loud.size == 0:
+        return pcm
+    pad = OUTPUT_SAMPLE_RATE * pad_ms // 1000
+    a, b = max(0, loud[0] - pad), min(x.size, loud[-1] + pad)
+    return x[a:b].tobytes()
+
+
+class BackchannelProcessor(FrameProcessor):
+    """Plays soft native fillers while the learner talks.
+
+    Two triggers, like a real listener:
+      • continuous speech: one filler every min..max seconds (random each time)
+      • micro-pause: when VAD says the learner paused and they had spoken for at
+        least ~min seconds since the last filler, say one right at the pause
+    Never while Riya herself is speaking. Clips are synthesised once (Chirp3-HD,
+    picked voice) in a worker thread and cached on disk.
+    """
+
+    POLL_SECS = 0.2
+
+    def __init__(self, *, lang_key: str, voice: str, credentials_path: str,
+                 min_secs: float, max_secs: float, gain: float):
+        super().__init__()
+        self._lang, self._voice, self._creds = lang_key, voice, credentials_path
+        self._min, self._max = min_secs, max(max_secs, min_secs)
+        self._gain = max(0.0, min(1.0, gain))
+        self._clips: list[bytes] = []     # all clips (hums + words), for "any loaded" checks
+        self._hums: list[bytes] = []
+        self._words: list[bytes] = []
+        self._last_clip: bytes | None = None
+        self._load_future = None
+        self._loop_task: asyncio.Task | None = None
+        self._bot_speaking = False
+        self._user_speaking = False
+        self._since = 0.0          # monotonic: start of speech since last filler
+        self._last_idx = -1
+
+    # ---- clips -------------------------------------------------------------
+    def _kick_load(self):
+        if self._clips or self._load_future is not None:
+            return
+        loop = asyncio.get_running_loop()
+        self._load_future = loop.run_in_executor(
+            None, _synth_backchannel_clips, self._lang, self._voice, self._creds)
+
+        def _done(fut):
+            try:
+                self._hums, self._words = fut.result()
+                self._clips = self._hums + self._words
+                logger.info(f"[backchannel] ready: {len(self._hums)} hums + {len(self._words)} words lang={self._lang} voice={self._voice}")
+            except Exception as e:
+                logger.warning(f"[backchannel] clip synthesis failed: {e}")
+        self._load_future.add_done_callback(_done)
+
+    # ---- frames ------------------------------------------------------------
+    async def process_frame(self, frame, direction):
+        await super().process_frame(frame, direction)
+        if isinstance(frame, VADUserStartedSpeakingFrame):
+            self._kick_load()
+            if not self._user_speaking:
+                self._user_speaking = True
+                if not self._since:
+                    self._since = time.monotonic()
+                self._start_loop()
+        elif isinstance(frame, VADUserStoppedSpeakingFrame):
+            self._user_speaking = False
+            self._stop_loop()
+            spoken = time.monotonic() - self._since if self._since else 0.0
+            if spoken >= self._min * 0.6 and not self._bot_speaking and self._clips:
+                await self._play_random()   # filler right at the micro-pause
+                self._since = 0.0
+        elif isinstance(frame, BotStartedSpeakingFrame):
+            self._bot_speaking = True
+            self._stop_loop()
+            self._since = 0.0
+        elif isinstance(frame, BotStoppedSpeakingFrame):
+            self._bot_speaking = False
+        await self.push_frame(frame, direction)
+
+    def _start_loop(self):
+        if self._loop_task is None or self._loop_task.done():
+            self._loop_task = asyncio.get_running_loop().create_task(self._run())
+
+    def _stop_loop(self):
+        if self._loop_task and not self._loop_task.done():
+            self._loop_task.cancel()
+        self._loop_task = None
+
+    async def _run(self):
+        """While the learner keeps talking, fire a filler every min..max seconds."""
+        try:
+            target = random.uniform(self._min, self._max)
+            while self._user_speaking:
+                await asyncio.sleep(self.POLL_SECS)
+                if self._bot_speaking or not self._clips or not self._since:
+                    continue
+                if time.monotonic() - self._since >= target:
+                    await self._play_random()
+                    self._since = time.monotonic()
+                    target = random.uniform(self._min, self._max)
+        except asyncio.CancelledError:
+            pass
+
+    HUM_SHARE = 0.7   # ~7 of 10 fillers are hums, the rest a word (अच्छा / ओके / ठीक है)
+
+    async def _play_random(self):
+        pool = self._hums if (self._hums and (not self._words or random.random() < self.HUM_SHARE)) else self._words
+        if not pool:
+            return
+        choices = [c for c in pool if c is not self._last_clip] or pool
+        clip = random.choice(choices)
+        self._last_clip = clip
+        self._last_idx = self._clips.index(clip) if clip in self._clips else -1
+        await self._play(clip)
+
+    async def _play(self, pcm: bytes):
+        import numpy as np
+        data = (np.frombuffer(pcm, dtype=np.int16).astype(np.float32) * self._gain).astype(np.int16).tobytes()
+        step = OUTPUT_SAMPLE_RATE * 2 // 50  # 20 ms frames
+        logger.info(f"[backchannel] play clip {self._last_idx} ({len(data) / (OUTPUT_SAMPLE_RATE * 2):.2f}s)")
+        for i in range(0, len(data), step):
+            await self.push_frame(OutputAudioRawFrame(audio=data[i:i + step], sample_rate=OUTPUT_SAMPLE_RATE, num_channels=1))
+
+    async def cleanup(self):
+        self._stop_loop()
+        await super().cleanup()
+
+
 class TranscriptionGate(FrameProcessor):
     """Word-gated turn + interruption control.
 
@@ -280,6 +511,9 @@ class TranscriptionGate(FrameProcessor):
             # speaks Indian languages + English.
             if _is_foreign_garbage(text):
                 logger.info(f"[gate] dropped foreign-script garbage: {text!r}")
+                return
+            if _GHOST_TEXT.search(text):
+                logger.info(f"[gate] dropped Whisper ghost text: {text!r}")
                 return
 
             if self._bot_speaking:
@@ -401,6 +635,224 @@ def _build_stt(cfg: dict, http_base: str, stt_host: str,
         sample_rate=INPUT_SAMPLE_RATE,
         settings=stt_settings,
     )
+
+
+class MeteredGroqSTTService(GroqSTTService):
+    """Groq Whisper with (1) real auto-detect — the stock _transcribe asserts a
+    language is set, so language=None would error on every turn — and (2) each
+    segment's audio length reported to the call's CostMeter (Groq bills every
+    request at a 10 s minimum)."""
+
+    def __init__(self, *, meter: "CostMeter", **kwargs):
+        super().__init__(**kwargs)
+        self._meter = meter
+
+    async def run_stt(self, audio: bytes):
+        # Segmented STT hands us a mono 16-bit WAV (44-byte header).
+        rate = self.sample_rate or INPUT_SAMPLE_RATE
+        self._meter.add_stt_segment(max(0, len(audio) - 44) / (2 * rate))
+        async for frame in super().run_stt(audio):
+            yield frame
+
+    async def _transcribe(self, audio: bytes):
+        kwargs = {
+            "file": ("audio.wav", audio, "audio/wav"),
+            "model": self._settings.model,
+            "response_format": "verbose_json" if self._include_prob_metrics else "json",
+        }
+        if self._settings.language:
+            kwargs["language"] = self._settings.language
+        return await self._client.audio.transcriptions.create(**kwargs)
+
+
+def _build_groq_stt(cfg: dict, lang_key: str, meter: "CostMeter"):
+    """Groq Whisper, segmented on our Silero VAD turns (no realtime WebSocket).
+
+    Language: a GROQ_STT_LANGUAGE lock wins, else the call-page pick, else Whisper
+    auto-detect (TranscriptionGate drops foreign-script hallucinations)."""
+    lock = cfg["GROQ_STT_LANGUAGE"]
+    language = GOOGLE_LANG.get(lock if lock != "auto" else lang_key)
+    logger.info(f"[stt] Groq {cfg['GROQ_STT_MODEL']} language="
+                f"{language.value if language else 'auto-detect'}")
+    return MeteredGroqSTTService(
+        meter=meter,
+        api_key=os.getenv("GROQ_API_KEY"),
+        sample_rate=INPUT_SAMPLE_RATE,
+        settings=GroqSTTService.Settings(model=cfg["GROQ_STT_MODEL"], language=language),
+    )
+
+
+# Quote marks at a word boundary (not the apostrophe inside "I'm" / "don't").
+_BOUNDARY_QUOTES = re.compile(r"(?<!\w)['‘’\"“”]|['‘’\"“”](?!\w)")
+
+
+class SarvamSkipPunctTTSService(SarvamTTSService):
+    """Sarvam Bulbul with quote-safe input. Sarvam's WebSocket re-chunks text on its
+    side, so `बोलिए: 'I go to the office.'` leaves a trailing "'" chunk that it
+    rejects ("Text must contain at least one character from the allowed
+    languages") — one ErrorFrame per quoted line. Quotes aren't spoken, so strip
+    them at word boundaries and skip anything left that is punctuation only."""
+
+    async def run_tts(self, text: str, context_id: str):
+        text = _BOUNDARY_QUOTES.sub("", text or "")
+        if not text or _PUNCT_ONLY.match(text):
+            logger.debug(f"[tts] skipping punctuation-only fragment: {text!r}")
+            yield None
+            return
+        async for frame in super().run_tts(text, context_id):
+            yield frame
+
+
+def _build_sarvam_tts(cfg: dict, voice_id: str, speed: float, lang_key: str):
+    """Sarvam Bulbul over the streaming WebSocket.
+
+    Bulbul has no per-voice locale, so target_language_code comes from the call's
+    picked language (Hindi when none is picked). The picked voice wins over
+    SARVAM_TTS_VOICE, but only if it is a speaker of the selected model — a stale
+    name (e.g. the retired v2 "anushka") would fail the call.
+    """
+    model = cfg["SARVAM_TTS_MODEL"]
+    speakers = settings_store.sarvam_speakers(model)
+    candidates = [(voice_id or "").strip(), cfg["SARVAM_TTS_VOICE"].strip()]
+    voice = next((v for v in candidates if v in speakers), speakers[0])
+    if voice_id and voice_id != voice:
+        logger.warning(f"[tts] {voice_id!r} is not a {model} speaker — using {voice!r}")
+    # Per-call slider speed wins; fall back to the saved Sarvam pace.
+    pace = speed if speed and speed != 1.0 else cfg["SARVAM_TTS_PACE"]
+    language = Language.EN_IN if lang_key == "eng" else GOOGLE_LANG.get(lang_key, Language.HI_IN)
+    logger.info(f"[tts] Sarvam {model} voice={voice} lang={language.value} pace={pace} "
+                f"min_buffer={cfg['SARVAM_TTS_MIN_BUFFER']}")
+    return SarvamSkipPunctTTSService(
+        api_key=os.getenv("SARVAM_API_KEY"),
+        sample_rate=OUTPUT_SAMPLE_RATE,
+        settings=SarvamTTSService.Settings(
+            model=model,
+            voice=voice,
+            language=language,
+            pace=pace,
+            temperature=cfg["SARVAM_TTS_TEMPERATURE"],
+            enable_preprocessing=cfg["SARVAM_TTS_PREPROCESSING"],
+            min_buffer_size=cfg["SARVAM_TTS_MIN_BUFFER"],
+        ),
+    )
+
+
+class CostMeter(BaseObserver):
+    """Per-call cost + latency meter — turns "~₹0.80/min" into a measurement.
+
+    TTS characters and Gemini tokens come from pipecat usage MetricsFrames, STT
+    audio seconds from MeteredGroqSTTService, user→bot latency from
+    UserBotLatencyObserver. Priced with the "Cost meter" settings. Providers
+    without a rate show as n/a. After each bot turn a {"type": "cost"} message
+    goes out on the caption side channel.
+    """
+
+    def __init__(self, cfg: dict, websocket: WebSocket):
+        super().__init__()
+        self._cfg = cfg
+        self._ws = websocket
+        self._started = time.monotonic()
+        self._seen_metrics: set[int] = set()  # observers see a frame once per hop
+        self._last_sent = None
+        self.tts_chars = 0
+        self.tts_tok_in = 0     # Gemini TTS: text tokens in
+        self.tts_tok_out = 0    # Gemini TTS: audio tokens out (what is billed)
+        self.llm_in = 0
+        self.llm_out = 0
+        self.stt_requests = 0
+        self.stt_secs = 0.0
+        self.stt_billed_secs = 0.0
+        self.latencies: list[float] = []
+
+    def add_tts_usage(self, tok_in: int, tok_out: int):
+        self.tts_tok_in += tok_in
+        self.tts_tok_out += tok_out
+
+    def add_stt_segment(self, secs: float):
+        self.stt_requests += 1
+        self.stt_secs += secs
+        self.stt_billed_secs += max(secs, self._cfg["RATE_GROQ_MIN_BILLED_SECS"])
+
+    def add_latency(self, secs: float):
+        self.latencies.append(secs)
+
+    async def on_push_frame(self, data: FramePushed):
+        frame = data.frame
+        if isinstance(frame, MetricsFrame):
+            if frame.id in self._seen_metrics:
+                return
+            self._seen_metrics.add(frame.id)
+            for d in frame.data:
+                if isinstance(d, TTSUsageMetricsData):
+                    self.tts_chars += d.value
+                elif isinstance(d, LLMUsageMetricsData):
+                    self.llm_in += d.value.prompt_tokens
+                    self.llm_out += d.value.completion_tokens
+                elif isinstance(d, TTFBMetricsData) and d.value > 0:
+                    logger.info(f"[ttfb] {d.processor} {d.value:.2f}s")
+        elif isinstance(frame, BotStoppedSpeakingFrame):
+            await self._send()
+
+    def summary(self) -> dict:
+        c = self._cfg
+        usd_inr = c["USD_INR"]
+        minutes = max((time.monotonic() - self._started) / 60, 1 / 60)
+        tts = stt = None
+        if c["TTS_PROVIDER"] == "sarvam":
+            tts = self.tts_chars / 10_000 * c["RATE_SARVAM_TTS_INR_PER_10K_CHARS"]
+        elif c["TTS_PROVIDER"] == "google":
+            tts = self.tts_chars / 1e6 * c["RATE_GOOGLE_CHIRP_USD_PER_1M_CHARS"] * usd_inr
+        elif c["TTS_PROVIDER"] in ("gemini_lite", "gemini_flash"):
+            audio_rate = (c["RATE_GEMINI_LITE_TTS_USD_PER_1M_AUDIO_TOK"] if c["TTS_PROVIDER"] == "gemini_lite"
+                          else c["RATE_GEMINI_FLASH_TTS_USD_PER_1M_AUDIO_TOK"])
+            tts = (self.tts_tok_out * audio_rate + self.tts_tok_in * c["RATE_GEMINI_TTS_USD_PER_1M_TEXT_TOK"]) / 1e6 * usd_inr
+        if c["STT_PROVIDER"] == "groq":
+            rate = (c["RATE_GROQ_LARGE_USD_PER_HOUR"] if c["GROQ_STT_MODEL"] == "whisper-large-v3"
+                    else c["RATE_GROQ_TURBO_USD_PER_HOUR"])
+            stt = self.stt_billed_secs / 3600 * rate * usd_inr
+        elif c["STT_PROVIDER"] == "sarvam":
+            # Streaming STT receives the mic audio for the whole call → call length.
+            stt = minutes / 60 * c["RATE_SARVAM_STT_INR_PER_HOUR"]
+        if c["LLM_PROVIDER"] == "groq":
+            rin, rout = c["RATE_GROQ_LLM_USD_IN_PER_1M"], c["RATE_GROQ_LLM_USD_OUT_PER_1M"]
+        else:
+            rin, rout = c["RATE_LLM_USD_IN_PER_1M"], c["RATE_LLM_USD_OUT_PER_1M"]
+        llm = (self.llm_in * rin + self.llm_out * rout) / 1e6 * usd_inr
+        total = llm + (tts or 0) + (stt or 0)
+        lat = sorted(self.latencies)
+        p50 = lat[len(lat) // 2] if lat else None
+        p95 = lat[min(len(lat) - 1, int(len(lat) * 0.95))] if lat else None
+
+        def inr(v):
+            return "n/a" if v is None else f"₹{v:.2f}"
+
+        text = (f"{inr(total)} (tts {inr(tts)} · stt {inr(stt)} · llm {inr(llm)}) · "
+                f"{minutes:.1f} min · ₹{total / minutes:.2f}/min · "
+                f"{self.tts_chars} chars"
+                + (f" ({self.tts_tok_out} audio tok)" if self.tts_tok_out else "")
+                + f" · {self.stt_requests} stt req "
+                f"({self.stt_secs:.0f}s audio, {self.stt_billed_secs:.0f}s billed) · "
+                f"{self.llm_in}/{self.llm_out} tok")
+        if p50 is not None:
+            text += f" · latency p50 {p50:.2f}s p95 {p95:.2f}s (n={len(lat)})"
+        return {
+            "text": text, "total_inr": total, "tts_inr": tts, "stt_inr": stt, "llm_inr": llm,
+            "minutes": minutes, "inr_per_min": total / minutes,
+            "latency_p50": p50, "latency_p95": p95,
+        }
+
+    async def _send(self):
+        # BotStoppedSpeakingFrame travels both directions — send only on change.
+        key = (self.tts_chars, self.llm_in, self.llm_out, self.stt_requests, len(self.latencies))
+        if key == self._last_sent:
+            return
+        self._last_sent = key
+        s = self.summary()
+        logger.info(f"[cost] {s['text']}")
+        try:
+            await self._ws.send_text(json.dumps({"type": "cost", **s}))
+        except Exception:
+            pass
 
 
 def _build_smallest_tts(cfg: dict, speed: float, picked_voice: str = ""):
@@ -559,16 +1011,11 @@ async def run_bot(
     )
     vad_analyzer = SileroVADAnalyzer(params=vad_params)
     logger.info(f"[bot] VAD: {vad_analyzer.params!r}")
-    tts_desc = (
-        f"smallest:{cfg['SMALLEST_MODEL']}/{cfg['SMALLEST_VOICE']}/{cfg['SMALLEST_LANGUAGE']}"
-        if cfg["TTS_PROVIDER"] == "smallest"
-        else f"elevenlabs:{cfg['ELEVENLABS_TTS_MODEL']}"
-    )
     logger.info(
         f"[bot] LLM={cfg['GEMINI_MODEL']} temp={temperature} | "
-        f"STT={cfg['ELEVENLABS_STT_MODEL']} | TTS={tts_desc} "
-        f"speed={speed} region={cfg['ELEVENLABS_REGION']}"
+        f"STT={cfg['STT_PROVIDER']} | TTS={cfg['TTS_PROVIDER']} speed={speed}"
     )
+    meter = CostMeter(cfg, websocket)
 
     transport = FastAPIWebsocketTransport(
         websocket=websocket,
@@ -618,6 +1065,8 @@ async def run_bot(
                 sample_rate=INPUT_SAMPLE_RATE,
             )
             logger.info(f"[stt] Google Cloud STT langs={[l.value for l in langs]} model={cfg['GOOGLE_STT_MODEL']}")
+        elif cfg["STT_PROVIDER"] == "groq":
+            stt = _build_groq_stt(cfg, lang_key, meter)
         else:
             stt = _build_stt(cfg, http_base, stt_host, http_session)
 
@@ -635,6 +1084,27 @@ async def run_bot(
                 sample_rate=OUTPUT_SAMPLE_RATE,
             )
             logger.info(f"[tts] Google Cloud TTS voice={gvoice_id}")
+        elif cfg["TTS_PROVIDER"] in ("gemini_lite", "gemini_flash", "gemini"):
+            gvoice = (voice_id or "").strip() or cfg["GEMINI_TTS_VOICE"]
+            if cfg["TTS_PROVIDER"] == "gemini":
+                gmodel_tts = cfg["GEMINI_TTS_MODEL"]  # 3.1 preview, generateContent path
+                tts = GeminiFlashTTSService(
+                    api_key=os.getenv("GOOGLE_API_KEY"), aiohttp_session=http_session,
+                    model=gmodel_tts, voice=gvoice, style_prompt=cfg["GEMINI_TTS_STYLE"],
+                    sample_rate=OUTPUT_SAMPLE_RATE,
+                )
+            else:
+                gmodel_tts = ("gemini-3.8-flash-lite-tts" if cfg["TTS_PROVIDER"] == "gemini_lite"
+                              else "gemini-3.8-flash-tts")
+                tts = GeminiInteractionsTTSService(
+                    api_key=os.getenv("GOOGLE_API_KEY"), aiohttp_session=http_session,
+                    model=gmodel_tts, voice=gvoice, style_prompt=cfg["GEMINI_TTS_STYLE"],
+                    chunking=cfg["GEMINI_TTS_CHUNKING"], sample_rate=OUTPUT_SAMPLE_RATE,
+                    on_usage=meter.add_tts_usage,
+                )
+            logger.info(f"[tts] Gemini TTS model={gmodel_tts} voice={gvoice} chunking={cfg['GEMINI_TTS_CHUNKING']}")
+        elif cfg["TTS_PROVIDER"] == "sarvam":
+            tts = _build_sarvam_tts(cfg, voice_id, speed, lang_key)
         else:
             tts = _build_tts(cfg, voice_id, speed, http_base, ws_stream_url, http_session)
 
@@ -643,15 +1113,44 @@ async def run_bot(
         # higher temperatures).
         effective_prompt = _apply_language_block(system_prompt, lang_key) + _language_directive(lang_key)
 
-        llm = GoogleLLMService(
-            api_key=os.getenv("GOOGLE_API_KEY"),
-            settings=GoogleLLMSettings(
-                model=cfg["GEMINI_MODEL"],
-                system_instruction=effective_prompt,
-                temperature=temperature,
-                max_tokens=cfg["GEMINI_MAX_TOKENS"],
-            ),
-        )
+        backchannel = []
+        if cfg["BACKCHANNEL_ENABLED"]:
+            bc_voice = (voice_id or "").strip()
+            if not bc_voice or not bc_voice[0].isupper() or len(bc_voice) > 16:
+                bc_voice = cfg["GOOGLE_TTS_VOICE"]  # non-Chirp voice id (ElevenLabs/Sarvam) -> default persona
+            backchannel = [BackchannelProcessor(
+                lang_key=lang_key, voice=bc_voice, credentials_path=gcreds,
+                min_secs=cfg["BACKCHANNEL_MIN_SECS"], max_secs=cfg["BACKCHANNEL_MAX_SECS"],
+                gain=cfg["BACKCHANNEL_GAIN"],
+            )]
+            logger.info(f"[backchannel] on: lang={lang_key} voice={bc_voice} every {cfg['BACKCHANNEL_MIN_SECS']}-{cfg['BACKCHANNEL_MAX_SECS']}s gain={cfg['BACKCHANNEL_GAIN']}")
+
+        if cfg["LLM_PROVIDER"] == "groq":
+            llm = GroqLLMService(
+                api_key=os.getenv("GROQ_API_KEY"),
+                settings=GroqLLMSettings(
+                    model=cfg["GROQ_LLM_MODEL"],
+                    system_instruction=effective_prompt,
+                    temperature=temperature,
+                    max_tokens=cfg["GEMINI_MAX_TOKENS"],
+                    # gpt-oss are reasoning models: cap the hidden thinking or every
+                    # reply costs hundreds of tokens and ~1 s extra before the first word.
+                    extra=({"reasoning_effort": cfg["GROQ_REASONING_EFFORT"]}
+                           if "gpt-oss" in cfg["GROQ_LLM_MODEL"] else {}),
+                ),
+            )
+            logger.info(f"[llm] Groq model={cfg['GROQ_LLM_MODEL']} temp={temperature}")
+        else:
+            llm = GoogleLLMService(
+                api_key=os.getenv("GOOGLE_API_KEY"),
+                settings=GoogleLLMSettings(
+                    model=cfg["GEMINI_MODEL"],
+                    system_instruction=effective_prompt,
+                    temperature=temperature,
+                    max_tokens=cfg["GEMINI_MAX_TOKENS"],
+                ),
+            )
+            logger.info(f"[llm] Gemini model={cfg['GEMINI_MODEL']} temp={temperature}")
 
         # Seed the first user turn. If a language was chosen on the client, seed it
         # in that language so Riya starts there directly instead of asking; otherwise
@@ -698,13 +1197,26 @@ async def run_bot(
             llm,
             captions_bot,
             tts,
+            *backchannel,
             transport.output(),
             context_aggregator.assistant(),
         ])
 
+        latency_observer = UserBotLatencyObserver()
+
+        @latency_observer.event_handler("on_latency_measured")
+        async def on_latency_measured(observer, latency, *args):
+            meter.add_latency(latency)
+            logger.info(f"[latency] user turn end → Riya audio {latency:.2f}s")
+
         task = PipelineTask(
             pipeline,
-            params=PipelineParams(allow_interruptions=allow_interruptions),
+            params=PipelineParams(
+                allow_interruptions=allow_interruptions,
+                enable_metrics=True,
+                enable_usage_metrics=True,
+            ),
+            observers=[meter, latency_observer],
         )
 
         @transport.event_handler("on_client_connected")
@@ -720,5 +1232,6 @@ async def run_bot(
         runner = PipelineRunner(handle_sigint=False)
         await runner.run(task)
     finally:
+        logger.info(f"[cost] call total: {meter.summary()['text']}")
         if http_session is not None:
             await http_session.close()

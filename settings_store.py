@@ -5,7 +5,9 @@ A flat list of tunable settings (LLM / TTS / STT / VAD / turn-taking), each with
 a name, type, default, dropdown choices, and a human description. Values persist
 to data/settings.json; anything not overridden falls back to its schema default.
 
-Everything here is ElevenLabs-only (STT + TTS) — Sarvam is intentionally gone.
+Providers: TTS = ElevenLabs / Google Chirp3-HD / Sarvam Bulbul; STT = ElevenLabs /
+Sarvam saaras / Google / Groq Whisper. The "Cost meter" group holds the rates the
+per-call cost meter in bot.py prices usage with.
 
 Public API:
   SCHEMA                 — ordered list of setting definitions (for the UI)
@@ -80,7 +82,7 @@ def smallest_voices() -> list[dict]:
 # Gemini TTS prebuilt voices (name + vibe from Google docs). Tutor-friendly first.
 GEMINI_VOICES = [
     ("Achird", "Friendly"), ("Sulafat", "Warm"), ("Aoede", "Breezy"),
-    ("Leda", "Youthful"), ("Callirhoe", "Easy-going"), ("Vindemiatrix", "Gentle"),
+    ("Leda", "Youthful"), ("Callirrhoe", "Easy-going"), ("Vindemiatrix", "Gentle"),
     ("Kore", "Firm"), ("Puck", "Upbeat"), ("Autonoe", "Bright"), ("Zephyr", "Bright"),
     ("Charon", "Informative"), ("Sadachbia", "Lively"), ("Laomedeia", "Upbeat"),
     ("Achernar", "Soft"), ("Despina", "Smooth"), ("Algieba", "Smooth"),
@@ -99,11 +101,74 @@ def gemini_voices() -> list[dict]:
              "languages": ["multilingual"]} for name, vibe in GEMINI_VOICES]
 
 
+# Sarvam Bulbul speakers per model. Sarvam deprecated bulbul:v2 (the API answers
+# 400 "use bulbul:v3" — checked 10 Sep 2026), so only v3 is offered. Speaker sets
+# differ per model, so a stale name (e.g. v2's "anushka") falls back in bot.py.
+# Every speaker reads all Bulbul languages; the call's language sets the locale.
+SARVAM_SPEAKERS = {
+    "bulbul:v3": ["priya", "ritu", "neha", "pooja", "simran", "kavya", "ishita", "shreya",
+                  "roopa", "amelia", "sophia", "shubh", "aditya", "rahul", "rohan", "amit",
+                  "dev", "ratan", "varun", "manan", "sumit", "kabir", "aayan", "ashutosh",
+                  "advait"],
+}
+
+
+def sarvam_speakers(model: str) -> list[str]:
+    return list(SARVAM_SPEAKERS.get(model, SARVAM_SPEAKERS["bulbul:v3"]))
+
+
+def sarvam_voices(model: str) -> list[dict]:
+    """Bulbul speakers for the picker, for the given model."""
+    return [{"voice_id": name, "name": name.title(), "model": model,
+             "languages": ["hi", "te", "ta", "kn", "ml", "bn", "en"]}
+            for name in sarvam_speakers(model)]
+
+
 # --- Schema -----------------------------------------------------------------
 # type: "select" | "number" | "int" | "bool" | "text"
 # select entries carry `choices` = [{"value", "label"}]
 SCHEMA: list[dict[str, Any]] = [
     # ---------- LLM (Google Gemini) ----------
+    {
+        "key": "LLM_PROVIDER",
+        "label": "LLM_PROVIDER",
+        "group": "LLM provider",
+        "type": "select",
+        "default": "gemini",
+        "choices": [
+            {"value": "gemini", "label": "gemini — Google Gemini (GEMINI_MODEL below)"},
+            {"value": "groq", "label": "groq — Groq-hosted open models (GROQ_LLM_MODEL below; fast, fewer content filters)"},
+        ],
+        "description": "Which LLM answers the learner. Temperature and max tokens (GEMINI_* keys) apply to both.",
+    },
+    {
+        "key": "GROQ_LLM_MODEL",
+        "label": "GROQ_LLM_MODEL",
+        "group": "LLM provider",
+        "type": "select",
+        "default": "openai/gpt-oss-120b",
+        "choices": [
+            {"value": "openai/gpt-oss-120b", "label": "openai/gpt-oss-120b — best quality on Groq, good Hindi, ~$0.15/$0.60 per 1M"},
+            {"value": "openai/gpt-oss-20b", "label": "openai/gpt-oss-20b — fastest, cheaper, weaker Indic"},
+            {"value": "qwen/qwen3.8-27b", "label": "qwen/qwen3.8-27b — Qwen 3.8, looser style, decent Hindi"},
+            {"value": "allam-2-7b", "label": "allam-2-7b — small Arabic/English model (not for Indic)"},
+        ],
+        "description": "Groq model used when LLM_PROVIDER = groq (list checked against the account on 28 Sep 2026).",
+    },
+    {
+        "key": "GROQ_REASONING_EFFORT",
+        "label": "GROQ_REASONING_EFFORT",
+        "group": "LLM provider",
+        "type": "select",
+        "default": "low",
+        "choices": [
+            {"value": "low", "label": "low — minimal hidden reasoning; fastest, cheapest (voice default)"},
+            {"value": "medium", "label": "medium"},
+            {"value": "high", "label": "high — slow, many billed reasoning tokens"},
+        ],
+        "description": "For gpt-oss models on Groq: how much hidden reasoning before the spoken reply. "
+                       "Reasoning tokens are billed as output and add latency.",
+    },
     {
         "key": "GEMINI_MODEL",
         "label": "GEMINI_MODEL",
@@ -152,10 +217,16 @@ SCHEMA: list[dict[str, Any]] = [
         "choices": [
             {"value": "elevenlabs", "label": "elevenlabs — ElevenLabs (streaming + eleven_v3 HTTP)"},
             {"value": "google", "label": "google — Google Cloud TTS Chirp3-HD (service account; realtime, HD Indian voices)"},
+            {"value": "gemini_lite", "label": "gemini_lite — Gemini 3.8 Flash-Lite TTS ($6/1M audio tok; cheaper, faster)"},
+            {"value": "gemini_flash", "label": "gemini_flash — Gemini 3.8 Flash TTS ($9/1M audio tok; best quality)"},
+            {"value": "gemini", "label": "gemini — Gemini 3.1 Flash TTS preview (older generateContent path; model below)"},
+            {"value": "sarvam", "label": "sarvam — Sarvam Bulbul v3 (streaming WS; cheap stack)"},
         ],
         "description": "Which TTS engine synthesises Riya's voice. 'elevenlabs' uses the ElevenLabs "
                        "settings below (streaming WS; eleven_v3 via HTTP). 'google' uses Cloud TTS "
-                       "Chirp3-HD — voice id composed per session language, ~0.2s first audio.",
+                       "Chirp3-HD — voice id composed per session language, ~0.2s first audio. "
+                       "'sarvam' uses Bulbul (see 'TTS (Sarvam Bulbul)') — pick a language on the "
+                       "call page, Bulbul needs it (defaults to Hindi otherwise).",
     },
 
     # ---------- STT provider ----------
@@ -169,10 +240,225 @@ SCHEMA: list[dict[str, Any]] = [
             {"value": "elevenlabs", "label": "elevenlabs — ElevenLabs Scribe (realtime WebSocket, low latency)"},
             {"value": "sarvam", "label": "sarvam — Sarvam saaras (Indian codemix, native script; best Telugu accuracy)"},
             {"value": "google", "label": "google — Google Cloud STT (service account; realtime, low latency)"},
+            {"value": "groq", "label": "groq — Groq Whisper (segmented per VAD turn; ~$0.04/hr, cheap stack)"},
         ],
         "description": "Which engine transcribes the learner's speech. 'elevenlabs' = realtime Scribe "
                        "(lowest latency, ~50ms). 'sarvam' = saaras codemix — best Indian-language "
-                       "accuracy, native script (~300-500ms batch). 'google' = Cloud STT streaming.",
+                       "accuracy, native script (~300-500ms batch). 'google' = Cloud STT streaming. "
+                       "'groq' = Whisper on each VAD-cut utterance (see 'STT (Groq Whisper)').",
+    },
+
+    # ---------- TTS (Sarvam Bulbul) ----------
+    {
+        "key": "SARVAM_TTS_MODEL",
+        "label": "SARVAM_TTS_MODEL",
+        "group": "TTS (Sarvam Bulbul)",
+        "type": "select",
+        "default": "bulbul:v3",
+        "choices": [
+            {"value": "bulbul:v3", "label": "bulbul:v3 — current Bulbul (v2 is deprecated by Sarvam)"},
+        ],
+        "description": "Bulbul model (used when TTS_PROVIDER = sarvam). Sarvam retired bulbul:v2 — "
+                       "its API now rejects v2 requests — so v3 is the only option.",
+    },
+    {
+        "key": "SARVAM_TTS_VOICE",
+        "label": "SARVAM_TTS_VOICE",
+        "group": "TTS (Sarvam Bulbul)",
+        "type": "text",
+        "default": "",
+        "description": "Fallback speaker when no voice is picked on the call page (blank = priya). "
+                       "A name that isn't a speaker of the model falls back to priya.",
+    },
+    {
+        "key": "SARVAM_TTS_PACE",
+        "label": "SARVAM_TTS_PACE",
+        "group": "TTS (Sarvam Bulbul)",
+        "type": "number", "min": 0.5, "max": 2.0, "step": 0.05,
+        "default": 1.0,
+        "description": "Speaking pace. Range 0.5-2.0. The call-page speed slider wins whenever it "
+                       "is not at 1.00×.",
+    },
+    {
+        "key": "SARVAM_TTS_TEMPERATURE",
+        "label": "SARVAM_TTS_TEMPERATURE",
+        "group": "TTS (Sarvam Bulbul)",
+        "type": "number", "min": 0.01, "max": 1.0, "step": 0.05,
+        "default": 0.6,
+        "description": "Expressiveness / randomness. Range 0.01-1.0. Lower = steadier delivery.",
+    },
+    {
+        "key": "SARVAM_TTS_PREPROCESSING",
+        "label": "SARVAM_TTS_PREPROCESSING",
+        "group": "TTS (Sarvam Bulbul)",
+        "type": "bool",
+        "default": True,
+        "description": "Normalise numbers, ₹ amounts and English words in Indian-script text before "
+                       "synthesis. Sarvam may force this on for v3.",
+    },
+    {
+        "key": "SARVAM_TTS_MIN_BUFFER",
+        "label": "SARVAM_TTS_MIN_BUFFER",
+        "group": "TTS (Sarvam Bulbul)",
+        "type": "int", "min": 10, "max": 200, "step": 10,
+        "default": 50,
+        "description": "Characters Sarvam buffers before generating audio. Lower = faster first "
+                       "audio, possibly choppier prosody. Main latency knob.",
+    },
+
+    # ---------- STT (Groq Whisper) ----------
+    {
+        "key": "GROQ_STT_MODEL",
+        "label": "GROQ_STT_MODEL",
+        "group": "STT (Groq Whisper)",
+        "type": "select",
+        "default": "whisper-large-v3",
+        "choices": [
+            {"value": "whisper-large-v3", "label": "whisper-large-v3 — $0.111/hr, usable Telugu (recommended)"},
+            {"value": "whisper-large-v3-turbo", "label": "whisper-large-v3-turbo — $0.04/hr, OK Hindi, garbles Telugu"},
+        ],
+        "description": "Groq Whisper model (used when STT_PROVIDER = groq). In our Telugu test turbo "
+                       "garbled most words and, with no language hint, wrote Telugu speech in Gujarati "
+                       "script (dropped by the script gate); large-v3 was close to Sarvam saaras. Groq "
+                       "bills each request at a 10 s minimum.",
+    },
+    {
+        "key": "GROQ_STT_LANGUAGE",
+        "label": "GROQ_STT_LANGUAGE",
+        "group": "STT (Groq Whisper)",
+        "type": "select",
+        "default": "auto",
+        "choices": [
+            {"value": "auto", "label": "auto — follow the call-page language; Whisper auto-detect if none picked"},
+            {"value": "hin", "label": "hin — lock Hindi"},
+            {"value": "tel", "label": "tel — lock Telugu"},
+            {"value": "tam", "label": "tam — lock Tamil"},
+            {"value": "kan", "label": "kan — lock Kannada"},
+            {"value": "mal", "label": "mal — lock Malayalam"},
+            {"value": "ben", "label": "ben — lock Bengali"},
+            {"value": "eng", "label": "eng — lock English"},
+        ],
+        "description": "Whisper takes ONE language hint. 'auto' passes the language picked on the "
+                       "call page; with no pick it auto-detects (foreign-script output is dropped by "
+                       "the gate). A lock here overrides the call page.",
+    },
+
+    # ---------- Cost meter ----------
+    {
+        "key": "RATE_SARVAM_TTS_INR_PER_10K_CHARS",
+        "label": "RATE_SARVAM_TTS_INR_PER_10K_CHARS",
+        "group": "Cost meter",
+        "type": "number", "min": 0.0, "max": 1000.0, "step": 0.5,
+        "default": 30.0,
+        "description": "Sarvam bulbul:v3 price in ₹ per 10,000 characters.",
+    },
+    {
+        "key": "RATE_GOOGLE_CHIRP_USD_PER_1M_CHARS",
+        "label": "RATE_GOOGLE_CHIRP_USD_PER_1M_CHARS",
+        "group": "Cost meter",
+        "type": "number", "min": 0.0, "max": 1000.0, "step": 0.5,
+        "default": 30.0,
+        "description": "Google Cloud TTS Chirp3-HD price in $ per 1M characters.",
+    },
+    {
+        "key": "RATE_GEMINI_LITE_TTS_USD_PER_1M_AUDIO_TOK",
+        "label": "RATE_GEMINI_LITE_TTS_USD_PER_1M_AUDIO_TOK",
+        "group": "Cost meter",
+        "type": "number", "min": 0.0, "max": 1000.0, "step": 0.5,
+        "default": 6.0,
+        "description": "Gemini 3.8 Flash-Lite TTS: $ per 1M audio output tokens ($6 till 31 Dec 2026, "
+                       "$12 from 1 Jan 2027). ~40 audio tokens per second of speech.",
+    },
+    {
+        "key": "RATE_GEMINI_FLASH_TTS_USD_PER_1M_AUDIO_TOK",
+        "label": "RATE_GEMINI_FLASH_TTS_USD_PER_1M_AUDIO_TOK",
+        "group": "Cost meter",
+        "type": "number", "min": 0.0, "max": 1000.0, "step": 0.5,
+        "default": 9.0,
+        "description": "Gemini 3.8 Flash TTS: $ per 1M audio output tokens ($9 till 31 Dec 2026, $18 after).",
+    },
+    {
+        "key": "RATE_GEMINI_TTS_USD_PER_1M_TEXT_TOK",
+        "label": "RATE_GEMINI_TTS_USD_PER_1M_TEXT_TOK",
+        "group": "Cost meter",
+        "type": "number", "min": 0.0, "max": 100.0, "step": 0.1,
+        "default": 0.5,
+        "description": "Gemini 3.8 TTS: $ per 1M text input tokens ($0.50 till 31 Dec 2026, $1 after).",
+    },
+    {
+        "key": "RATE_SARVAM_STT_INR_PER_HOUR",
+        "label": "RATE_SARVAM_STT_INR_PER_HOUR",
+        "group": "Cost meter",
+        "type": "number", "min": 0.0, "max": 1000.0, "step": 1,
+        "default": 30.0,
+        "description": "Sarvam saaras speech-to-text price in ₹ per audio hour. The call streams mic "
+                       "audio to Sarvam the whole time, so the meter prices it on call length — an "
+                       "upper bound until checked against the Sarvam dashboard.",
+    },
+    {
+        "key": "RATE_GROQ_TURBO_USD_PER_HOUR",
+        "label": "RATE_GROQ_TURBO_USD_PER_HOUR",
+        "group": "Cost meter",
+        "type": "number", "min": 0.0, "max": 10.0, "step": 0.001,
+        "default": 0.04,
+        "description": "Groq whisper-large-v3-turbo price in $ per audio hour.",
+    },
+    {
+        "key": "RATE_GROQ_LARGE_USD_PER_HOUR",
+        "label": "RATE_GROQ_LARGE_USD_PER_HOUR",
+        "group": "Cost meter",
+        "type": "number", "min": 0.0, "max": 10.0, "step": 0.001,
+        "default": 0.111,
+        "description": "Groq whisper-large-v3 price in $ per audio hour.",
+    },
+    {
+        "key": "RATE_GROQ_MIN_BILLED_SECS",
+        "label": "RATE_GROQ_MIN_BILLED_SECS",
+        "group": "Cost meter",
+        "type": "number", "min": 0.0, "max": 60.0, "step": 1,
+        "default": 10.0,
+        "description": "Groq's per-request billing floor in seconds — every utterance is billed at "
+                       "least this long.",
+    },
+    {
+        "key": "RATE_GROQ_LLM_USD_IN_PER_1M",
+        "label": "RATE_GROQ_LLM_USD_IN_PER_1M",
+        "group": "Cost meter",
+        "type": "number", "min": 0.0, "max": 100.0, "step": 0.01,
+        "default": 0.15,
+        "description": "Groq LLM input price $/1M tokens (gpt-oss-120b list price; used when LLM_PROVIDER = groq).",
+    },
+    {
+        "key": "RATE_GROQ_LLM_USD_OUT_PER_1M",
+        "label": "RATE_GROQ_LLM_USD_OUT_PER_1M",
+        "group": "Cost meter",
+        "type": "number", "min": 0.0, "max": 100.0, "step": 0.01,
+        "default": 0.60,
+        "description": "Groq LLM output price $/1M tokens (gpt-oss-120b list price).",
+    },
+    {
+        "key": "RATE_LLM_USD_IN_PER_1M",
+        "label": "RATE_LLM_USD_IN_PER_1M",
+        "group": "Cost meter",
+        "type": "number", "min": 0.0, "max": 100.0, "step": 0.01,
+        "default": 0.25,
+        "description": "Gemini input price in $ per 1M tokens (3.1 flash-lite = 0.25).",
+    },
+    {
+        "key": "RATE_LLM_USD_OUT_PER_1M",
+        "label": "RATE_LLM_USD_OUT_PER_1M",
+        "group": "Cost meter",
+        "type": "number", "min": 0.0, "max": 100.0, "step": 0.01,
+        "default": 1.50,
+        "description": "Gemini output price in $ per 1M tokens (3.1 flash-lite = 1.50).",
+    },
+    {
+        "key": "USD_INR",
+        "label": "USD_INR",
+        "group": "Cost meter",
+        "type": "number", "min": 1.0, "max": 200.0, "step": 0.5,
+        "default": 88.0,
+        "description": "Exchange rate used to convert $ rates to ₹.",
     },
 
     # ---------- Sarvam STT ----------
@@ -206,6 +492,52 @@ SCHEMA: list[dict[str, Any]] = [
     },
 
     # ---------- Google Cloud audio (service account) ----------
+    # ---------- Gemini TTS (API key) ----------
+    {
+        "key": "GEMINI_TTS_MODEL",
+        "label": "GEMINI_TTS_MODEL",
+        "group": "TTS (Gemini)",
+        "type": "select",
+        "default": "gemini-3.1-flash-tts-preview",
+        "choices": [
+            {"value": "gemini-3.1-flash-tts-preview",
+             "label": "gemini-3.1-flash-tts-preview — generateContent path ($20/1M audio tok)"},
+        ],
+        "description": "Model for TTS_PROVIDER = gemini (the 3.1 preview path). The 3.8 models are "
+                       "their own providers: gemini_lite / gemini_flash.",
+    },
+    {
+        "key": "GEMINI_TTS_CHUNKING",
+        "label": "GEMINI_TTS_CHUNKING",
+        "group": "TTS (Gemini)",
+        "type": "select",
+        "default": "response",
+        "choices": [
+            {"value": "response", "label": "response — one TTS request per reply: no gaps between sentences (recommended)"},
+            {"value": "sentence", "label": "sentence — one request per sentence: first word sooner, ~1.5 s hole after every । . ?"},
+        ],
+        "description": "Gemini 3.8 TTS has ~1.5 s time-to-first-byte per request. Per-sentence "
+                       "chunking (pipecat default) therefore pauses after every sentence; "
+                       "'response' sends the whole reply at once.",
+    },
+    {
+        "key": "GEMINI_TTS_VOICE",
+        "label": "GEMINI_TTS_VOICE",
+        "group": "TTS (Gemini)",
+        "type": "text",
+        "default": "Aoede",
+        "description": "Default Gemini prebuilt voice (Aoede, Kore, Sulafat, Achird, …). The voice "
+                       "picked on the call page overrides this. Same 30 names as Chirp3-HD.",
+    },
+    {
+        "key": "GEMINI_TTS_STYLE",
+        "label": "GEMINI_TTS_STYLE",
+        "group": "TTS (Gemini)",
+        "type": "text",
+        "default": "warm, friendly Indian English teacher; natural conversational pace",
+        "description": "Delivery style sent as a speech_metadata annotation with every line "
+                       "(3.8 models) or prefixed as an instruction (3.1 preview). Empty = model default.",
+    },
     {
         "key": "GOOGLE_TTS_VOICE",
         "label": "GOOGLE_TTS_VOICE",
@@ -430,6 +762,43 @@ SCHEMA: list[dict[str, Any]] = [
     },
 
     # ---------- Turn-taking ----------
+    # ---------- Backchannel (listening fillers) ----------
+    {
+        "key": "BACKCHANNEL_ENABLED",
+        "label": "BACKCHANNEL_ENABLED",
+        "group": "Backchannel (listening fillers)",
+        "type": "bool",
+        "default": False,
+        "description": "While the learner is talking, Riya softly reacts like a real listener: mostly the "
+                       "recorded hums (data/backchannel/custom), sometimes a word (अच्छा / ओके / ठीक है), "
+                       "every 2-3 beats and at their pauses. "
+                       "Clips are Chirp3-HD in the picked voice, cached in data/backchannel/. "
+                       "They do not count as Riya's turn (no captions, no interruption).",
+    },
+    {
+        "key": "BACKCHANNEL_MIN_SECS",
+        "label": "BACKCHANNEL_MIN_SECS",
+        "group": "Backchannel (listening fillers)",
+        "type": "number",
+        "default": 4.0,
+        "description": "Shortest gap between fillers while the learner talks (≈2 beats of 2 s).",
+    },
+    {
+        "key": "BACKCHANNEL_MAX_SECS",
+        "label": "BACKCHANNEL_MAX_SECS",
+        "group": "Backchannel (listening fillers)",
+        "type": "number",
+        "default": 6.0,
+        "description": "Longest gap between fillers (≈3 beats); each gap is random between min and max, so it never sounds metronomic.",
+    },
+    {
+        "key": "BACKCHANNEL_GAIN",
+        "label": "BACKCHANNEL_GAIN",
+        "group": "Backchannel (listening fillers)",
+        "type": "number",
+        "default": 0.5,
+        "description": "Filler loudness relative to Riya's normal voice (0.0–1.0). Keep it soft.",
+    },
     {
         "key": "ALLOW_INTERRUPTIONS",
         "label": "ALLOW_INTERRUPTIONS",

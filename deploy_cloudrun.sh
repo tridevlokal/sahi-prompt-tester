@@ -16,7 +16,7 @@ import sys, yaml
 from dotenv import dotenv_values
 env = dotenv_values(".env")
 keys = ["GOOGLE_API_KEY","ELEVENLABS_API_KEY","ELEVENLABS_TTS_API_KEY","SARVAM_API_KEY",
-        "SMALLEST_API_KEY","DEEPGRAM_API_KEY","ELEVENLABS_BASE_URL",
+        "SMALLEST_API_KEY","DEEPGRAM_API_KEY","GROQ_API_KEY","ELEVENLABS_BASE_URL",
         "VOICE_ID_ENGLISH","VOICE_ID_TAMIL","VOICE_ID_TELUGU","VOICE_ID_KANNADA"]
 out = {k: env[k] for k in keys if env.get(k)}
 out["GCP_SERVICE_ACCOUNT_JSON"] = open("gcp-service-account.json").read()

@@ -170,6 +170,7 @@
   <header>
     <h1>AI Riya — Test Call</h1>
     <span style="display:flex;gap:1.25rem;align-items:center">
+      <a href="/voice-lab">→ Voice Lab</a>
       <a href="/settings">→ Settings</a>
       <a href="/admin">→ Admin</a>
     </span>
@@ -226,7 +227,7 @@
         </label>
       </div>
       <div style="font-size:0.78rem;color:var(--muted);margin-top:0.5rem">
-        Speed = how fast Riya talks (ElevenLabs). Temperature = LLM creativity (higher = more varied).
+        Speed = how fast Riya talks (ElevenLabs speed / Sarvam pace). Temperature = LLM creativity (higher = more varied).
       </div>
     </section>
 
@@ -237,6 +238,7 @@
         <button id="end-btn" class="danger" disabled>End Call</button>
         <span id="status" class="status"><span class="dot"></span><span id="status-text">Idle</span></span>
       </div>
+      <div id="cost-meter" style="font-size:0.78rem;color:var(--muted);margin-top:0.6rem"></div>
       <div style="margin-top:1rem">
         <label>
           Live transcript
@@ -418,12 +420,18 @@
             id: v.voice_id, voice_id: v.voice_id, name: v.name,
             language: (v.languages || []).join('/'),
           }));
-        } else if (ttsProvider === 'gemini' || ttsProvider === 'google') {
+        } else if (ttsProvider.startsWith('gemini') || ttsProvider === 'google') {
           // Chirp3-HD (google) voice names == Gemini voice names — reuse the list.
           const gv = await api('GET', '/api/gemini/voices');
           voices = gv.map(v => ({
             id: v.voice_id, voice_id: v.voice_id, name: v.name,
             language: (v.languages || []).join('/'),
+          }));
+        } else if (ttsProvider === 'sarvam') {
+          // Bulbul speakers for the saved SARVAM_TTS_MODEL (v2 and v3 lists differ).
+          const sv = await api('GET', '/api/sarvam/voices');
+          voices = sv.map(v => ({
+            id: v.voice_id, voice_id: v.voice_id, name: v.name, language: v.model,
           }));
         } else {
           voices = await api('GET', '/api/voices');
@@ -438,14 +446,18 @@
         hint.innerHTML = `🔊 TTS: <b>Smallest.ai</b> (lightning-v3.1${smallestLang ? ', lang=' + smallestLang : ''}). ` +
           `Voices below are Smallest voices — all speak Hindi / English / Tamil / Telugu / Kannada / Malayalam. ` +
           `Change voice/language on <a href="/settings" style="color:var(--accent)">Settings</a>.`;
-      } else if (ttsProvider === 'gemini') {
-        hint.innerHTML = `🔊 TTS: <b>Gemini 3.1 Flash</b> (${cfg.GEMINI_TTS_MODEL || ''}) · STT: <b>${cfg.STT_PROVIDER}</b>. ` +
+      } else if (ttsProvider.startsWith('gemini')) {
+        hint.innerHTML = `🔊 TTS: <b>Gemini TTS</b> (${ttsProvider === 'gemini_lite' ? '3.8 Flash-Lite' : ttsProvider === 'gemini_flash' ? '3.8 Flash' : cfg.GEMINI_TTS_MODEL}) · STT: <b>${cfg.STT_PROVIDER}</b>. ` +
           `Voices below are Google/Gemini voices — pick one, it speaks all languages. ` +
           `Tune on <a href="/settings" style="color:var(--accent)">Settings</a>.`;
       } else if (ttsProvider === 'google') {
         hint.innerHTML = `🔊 TTS: <b>Google Cloud Chirp3-HD</b> · STT: <b>${cfg.STT_PROVIDER === 'google' ? 'Google Cloud' : cfg.STT_PROVIDER}</b>. ` +
           `Pick a voice name — it becomes '&lt;lang&gt;-Chirp3-HD-&lt;name&gt;' for the chosen language. ` +
           `Tune on <a href="/settings" style="color:var(--accent)">Settings</a>.`;
+      } else if (ttsProvider === 'sarvam') {
+        hint.innerHTML = `🔊 TTS: <b>Sarvam ${cfg.SARVAM_TTS_MODEL}</b> · STT: <b>${cfg.STT_PROVIDER}</b>. ` +
+          `Pick a language above — Bulbul needs it (defaults to Hindi). Cost + latency show under the call. ` +
+          `Compare voices in <a href="/voice-lab" style="color:var(--accent)">Voice Lab</a>.`;
       } else {
         hint.innerHTML = `🔊 TTS: <b>ElevenLabs</b> (${cfg.ELEVENLABS_TTS_MODEL || ''}). ` +
           `Switch provider on <a href="/settings" style="color:var(--accent)">Settings</a>.`;
@@ -619,6 +631,7 @@
           if (msg.type === 'user_interim') showUserInterim(msg.text || '');
           else if (msg.type === 'user') appendCaption('You', (msg.text || '').trim());
           else if (msg.type === 'bot') appendBotChunk(msg.text || '');
+          else if (msg.type === 'cost') $('#cost-meter').textContent = '💰 ' + (msg.text || '');
         } catch (e) {
           console.warn('caption parse failed', e, ev.data);
         }
@@ -656,6 +669,7 @@
       setStatus('connecting', 'Connecting…');
       $('#start-btn').disabled = true;
       $('#captions').innerHTML = '';
+      $('#cost-meter').textContent = '';
 
       try {
         await startMic();  // ask permission + open AudioContext

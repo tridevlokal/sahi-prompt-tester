@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Riya — Voice Lab</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #3b82f6;
+      --accent-hover: #2563eb;
+      --danger: #ef4444;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    header {
+      display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;
+      gap: 1rem; padding: 1rem 1.5rem; border-bottom: 1px solid var(--border);
+    }
+    header h1 { font-size: 1.15rem; margin: 0; }
+    header nav { display: flex; gap: 1.25rem; }
+    header a { color: var(--accent); text-decoration: none; font-size: 0.9rem; }
+    header a:hover { color: var(--accent-hover); }
+    main { max-width: 1000px; margin: 0 auto; padding: 1.5rem; display: flex; flex-direction: column; gap: 1.25rem; }
+    section { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 1.25rem; }
+    h2 { font-size: 1rem; margin: 0 0 0.9rem; }
+    label { display: flex; flex-direction: column; gap: 0.35rem; font-size: 0.8rem; color: var(--muted); }
+    select, input, textarea, button { font: inherit; font-size: 0.9rem; }
+    select, input, textarea {
+      background: var(--bg); color: var(--text); border: 1px solid var(--border);
+      border-radius: 6px; padding: 0.45rem 0.55rem; min-width: 0;
+    }
+    textarea { min-height: 4.5rem; resize: vertical; width: 100%; line-height: 1.5; }
+    button { background: var(--accent); color: #fff; border: 0; border-radius: 6px; padding: 0.5rem 0.9rem; cursor: pointer; }
+    button:hover { background: var(--accent-hover); }
+    button:disabled { opacity: 0.5; cursor: default; }
+    button.ghost { background: transparent; border: 1px solid var(--border); color: var(--text); }
+    button.danger { background: var(--danger); }
+    .row { display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: flex-end; }
+    .row > label { flex: 1; min-width: 160px; }
+    .check { flex-direction: row !important; align-items: center; gap: 0.4rem; flex: 0 0 auto !important; min-width: auto !important; }
+    .hint { font-size: 0.78rem; color: var(--muted); margin-top: 0.6rem; line-height: 1.5; }
+    .cand { display: grid; grid-template-columns: 1.2fr 1.4fr 0.6fr auto; gap: 0.6rem; align-items: end; margin-bottom: 0.6rem; }
+    @media (max-width: 640px) { .cand { grid-template-columns: 1fr 1fr; } }
+    .results { display: grid; gap: 0.75rem; margin-top: 1rem; }
+    .result { border: 1px solid var(--border); border-radius: 8px; padding: 0.8rem; background: var(--bg); }
+    .top { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem; }
+    .name { font-weight: 600; }
+    .meta { font-size: 0.78rem; color: var(--muted); margin-top: 0.4rem; }
+    .result audio { width: 100%; margin-top: 0.5rem; }
+    .small { padding: 0.2rem 0.55rem; font-size: 0.8rem; }
+    .stars button { background: transparent; border: 1px solid var(--border); color: var(--muted); padding: 0.2rem 0.5rem; margin-left: 0.2rem; }
+    .stars button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .transcript { margin-top: 0.5rem; font-size: 0.9rem; white-space: pre-wrap; }
+    .err { color: var(--danger); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>AI Riya — Voice Lab</h1>
+    <nav>
+      <a href="/">→ Test Call</a>
+      <a href="/settings">→ Settings</a>
+    </nav>
+  </header>
+
+  <main>
+    <section>
+      <h2>1 · Line to speak</h2>
+      <div class="row">
+        <label>
+          Language
+          <select id="lang">
+            <option value="hin">हिंदी — Hindi</option>
+            <option value="tel">తెలుగు — Telugu</option>
+            <option value="tam">தமிழ் — Tamil</option>
+            <option value="kan">ಕನ್ನಡ — Kannada</option>
+            <option value="eng">English</option>
+          </select>
+        </label>
+        <label>
+          Preset Riya line
+          <select id="preset"></select>
+        </label>
+      </div>
+      <label style="margin-top:0.75rem">
+        Text (editable)
+        <textarea id="text"></textarea>
+      </label>
+      <div id="chars" class="hint"></div>
+    </section>
+
+    <section>
+      <h2>2 · Voices to compare</h2>
+      <div id="cands"></div>
+      <div class="row" style="margin-top:0.4rem">
+        <button class="ghost" id="add">+ Add voice</button>
+        <label class="check"><input type="checkbox" id="blind"> Blind test</label>
+        <button id="render">Render all</button>
+        <button class="ghost" id="reveal" hidden>Reveal names</button>
+      </div>
+      <div class="hint">
+        Blind test shuffles the samples and labels them A/B/C — rate each 1–5, then reveal.
+        "render" is the full HTTP render time, not streaming first-audio latency (measure that on a
+        live call — cost meter + <code>[latency]</code> logs). Chirp3-HD and Sarvam cost = chars ×
+        rate from Settings; ElevenLabs isn't priced here. "→ Whisper" sends the sample to Groq to check
+        it's intelligible.
+      </div>
+      <div id="results" class="results"></div>
+    </section>
+
+    <section>
+      <h2>3 · Mic → Groq Whisper</h2>
+      <div class="row">
+        <label>
+          Model
+          <select id="stt-model">
+            <option value="whisper-large-v3-turbo">whisper-large-v3-turbo ($0.04/hr)</option>
+            <option value="whisper-large-v3">whisper-large-v3 ($0.111/hr)</option>
+          </select>
+        </label>
+        <label>
+          Language hint
+          <select id="stt-lang">
+            <option value="">auto-detect</option>
+            <option value="hin">Hindi</option>
+            <option value="tel">Telugu</option>
+            <option value="tam">Tamil</option>
+            <option value="kan">Kannada</option>
+            <option value="eng">English</option>
+          </select>
+        </label>
+        <button id="rec">● Record</button>
+      </div>
+      <div class="hint">
+        Try: normal speech, Hindi/Telugu + English mixed, a short "haan"/"ok", 5 s of silence, TV
+        noise. Any text on silence is ghost text — on calls, VAD + the script gate + the ghost
+        filter must drop it. Every request is billed at least 10 s.
+      </div>
+      <div id="stt-out" class="results"></div>
+    </section>
+  </main>
+
+  <script>
+    const $ = (sel) => document.querySelector(sel);
+    const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+    // Riya-style lines with the tricky bits Bulbul must read well: English loanwords,
+    // "Sahi English", ₹ amounts and numbers.
+    const PRESETS = {
+      hin: [
+        'नमस्ते! मैं रिया हूँ, Sahi English से। आज हम मिलकर थोड़ी English practice करेंगे।',
+        'बहुत बढ़िया! आपका sentence बिल्कुल सही था। अब एक बार और बोलकर देखिए।',
+        'कोई बात नहीं, गलती होना normal है। धीरे-धीरे बोलिए, मैं आपके साथ हूँ।',
+        'आप सिर्फ ₹99 में सात दिन का trial ले सकते हैं, app में सारे lessons मिल जाएँगे।',
+        'अच्छा बताइए, आप रोज़ कितने बजे office जाते हैं? English में जवाब दीजिए।',
+        'शाबाश! आज आपने 15 नए words सीखे। कल फिर मिलते हैं, bye!',
+      ],
+      tel: [
+        'నమస్కారం! నేను రియా, Sahi English నుండి. ఈరోజు మనం కలిసి కొంచెం English practice చేద్దాం.',
+        'చాలా బాగుంది! మీ sentence సరిగ్గా ఉంది. ఇంకొక్కసారి చెప్పి చూడండి.',
+        'పర్వాలేదు, తప్పులు రావడం normal. నెమ్మదిగా మాట్లాడండి, నేను మీతో ఉన్నాను.',
+        'కేవలం ₹99 కే ఏడు రోజుల trial తీసుకోవచ్చు, app లో అన్ని lessons ఉంటాయి.',
+        'సరే చెప్పండి, మీరు రోజూ ఎన్ని గంటలకు office కి వెళ్తారు? English లో జవాబు ఇవ్వండి.',
+        'శభాష్! ఈరోజు మీరు 15 కొత్త words నేర్చుకున్నారు. రేపు మళ్ళీ కలుద్దాం, bye!',
+      ],
+      tam: [
+        'வணக்கம்! நான் ரியா, Sahi English-இல் இருந்து. இன்று நாம் சேர்ந்து கொஞ்சம் English practice செய்யலாம்.',
+        'ரொம்ப நல்லது! உங்கள் sentence சரியாக இருந்தது. இன்னொரு முறை சொல்லிப் பாருங்கள்.',
+        'பரவாயில்லை, தவறு வருவது normal தான். மெதுவாகப் பேசுங்கள், நான் உங்களுடன் இருக்கிறேன்.',
+        'வெறும் ₹99-க்கு ஏழு நாள் trial எடுக்கலாம், app-இல் எல்லா lessons-உம் கிடைக்கும்.',
+        'சரி சொல்லுங்கள், நீங்கள் தினமும் எத்தனை மணிக்கு office போவீர்கள்? English-இல் பதில் சொல்லுங்கள்.',
+        'சபாஷ்! இன்று நீங்கள் 15 புதிய words கற்றுக்கொண்டீர்கள். நாளை மீண்டும் சந்திப்போம், bye!',
+      ],
+      kan: [
+        'ನಮಸ್ಕಾರ! ನಾನು ರಿಯಾ, Sahi English ಇಂದ. ಇವತ್ತು ನಾವು ಸೇರಿ ಸ್ವಲ್ಪ English practice ಮಾಡೋಣ.',
+        'ತುಂಬಾ ಚೆನ್ನಾಗಿದೆ! ನಿಮ್ಮ sentence ಸರಿಯಾಗಿತ್ತು. ಇನ್ನೊಂದು ಸಲ ಹೇಳಿ ನೋಡಿ.',
+        'ಪರವಾಗಿಲ್ಲ, ತಪ್ಪುಗಳು ಆಗೋದು normal. ನಿಧಾನವಾಗಿ ಮಾತಾಡಿ, ನಾನು ನಿಮ್ಮ ಜೊತೆ ಇದ್ದೀನಿ.',
+        'ಕೇವಲ ₹99 ಗೆ ಏಳು ದಿನದ trial ತಗೋಬಹುದು, app ನಲ್ಲಿ ಎಲ್ಲಾ lessons ಸಿಗುತ್ತೆ.',
+        'ಸರಿ ಹೇಳಿ, ನೀವು ದಿನಾ ಎಷ್ಟು ಗಂಟೆಗೆ office ಗೆ ಹೋಗ್ತೀರಾ? English ನಲ್ಲಿ ಉತ್ತರ ಕೊಡಿ.',
+        'ಶಭಾಷ್! ಇವತ್ತು ನೀವು 15 ಹೊಸ words ಕಲಿತಿರಿ. ನಾಳೆ ಮತ್ತೆ ಸಿಗೋಣ, bye!',
+      ],
+      eng: [
+        "Hi! I'm Riya from Sahi English. Let's practise a little English together today.",
+        'Great job! That sentence was perfect. Can you say it one more time?',
+        "No problem, mistakes are normal. Speak slowly, I'm right here with you.",
+        'You can start a seven-day trial for just ₹99, and all the lessons are in the app.',
+      ],
+    };
+
+    const ENGINES = [
+      ['google:chirp3-hd', 'Google Chirp3-HD'],
+      ['sarvam:bulbul:v3', 'Sarvam bulbul:v3'],
+      ['elevenlabs:', 'ElevenLabs (library voice)'],
+    ];
+
+    let cfg = {};
+    const voiceCache = {};
+
+    async function api(method, url, body) {
+      const r = await fetch(url, {
+        method,
+        headers: body ? { 'Content-Type': 'application/json' } : {},
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.detail || r.statusText);
+      return data;
+    }
+
+    // "sarvam:bulbul:v2" → ["sarvam", "bulbul:v2"]; "elevenlabs:" → ["elevenlabs", ""]
+    function splitEngine(engine) {
+      const i = engine.indexOf(':');
+      return [engine.slice(0, i), engine.slice(i + 1)];
+    }
+
+    async function voicesFor(engine) {
+      if (voiceCache[engine]) return voiceCache[engine];
+      const [provider, model] = splitEngine(engine);
+      const list = provider === 'sarvam'
+        ? await api('GET', '/api/sarvam/voices?model=' + encodeURIComponent(model))
+        : provider === 'google'
+        ? (await api('GET', '/api/gemini/voices')).map(v => ({ voice_id: v.voice_id, name: v.name }))
+        : (await api('GET', '/api/voices')).map(v => ({
+            voice_id: v.voice_id, name: v.name + (v.language ? ` [${v.language}]` : ''),
+          }));
+      return (voiceCache[engine] = list);
+    }
+
+    // ---------- line ----------
+    function updateChars() {
+      const n = $('#text').value.trim().length;
+      const sarvam = n / 10000 * (cfg.RATE_SARVAM_TTS_INR_PER_10K_CHARS ?? 30);
+      const chirp = n / 1e6 * (cfg.RATE_GOOGLE_CHIRP_USD_PER_1M_CHARS ?? 30) * (cfg.USD_INR ?? 88);
+      $('#chars').textContent = `${n} chars · Chirp3-HD ≈ ₹${chirp.toFixed(3)} · Sarvam ≈ ₹${sarvam.toFixed(3)}`;
+    }
+
+    function fillPresets() {
+      const lines = PRESETS[$('#lang').value];
+      $('#preset').innerHTML = lines
+        .map((t, i) => `<option value="${i}">${i + 1}. ${esc(t.length > 60 ? t.slice(0, 60) + '…' : t)}</option>`)
+        .join('') + '<option value="custom">Custom — type below</option>';
+      $('#text').value = lines[0];
+      updateChars();
+    }
+
+    $('#lang').onchange = () => {
+      fillPresets();
+      $('#stt-lang').value = $('#lang').value;
+    };
+    $('#preset').onchange = () => {
+      const v = $('#preset').value;
+      if (v !== 'custom') $('#text').value = PRESETS[$('#lang').value][+v];
+      updateChars();
+    };
+    $('#text').oninput = () => { $('#preset').value = 'custom'; updateChars(); };
+
+    // ---------- candidates ----------
+    function addCandidate(engine = 'sarvam:bulbul:v3', voice = '') {
+      const row = document.createElement('div');
+      row.className = 'cand';
+      row.innerHTML = `
+        <label>Engine<select class="eng">${ENGINES.map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select></label>
+        <label>Voice<select class="voice"></select></label>
+        <label>Pace<input class="pace" type="number" min="0.5" max="2" step="0.05" value="1"></label>
+        <button class="ghost rm" title="Remove">✕</button>`;
+      const eng = row.querySelector('.eng');
+      const sel = row.querySelector('.voice');
+      eng.value = engine;
+      const fill = async (want) => {
+        sel.innerHTML = '<option value="">loading…</option>';
+        try {
+          const list = await voicesFor(eng.value);
+          sel.innerHTML = list.map(v => `<option value="${esc(v.voice_id)}">${esc(v.name)}</option>`).join('');
+          if (want && list.some(v => v.voice_id === want)) sel.value = want;
+        } catch (e) {
+          sel.innerHTML = `<option value="">${esc(e.message)}</option>`;
+        }
+      };
+      eng.onchange = () => fill();
+      row.querySelector('.rm').onclick = () => row.remove();
+      $('#cands').appendChild(row);
+      fill(voice);
+    }
+
+    $('#add').onclick = () => addCandidate();
+
+    function shuffle(arr) {
+      const a = [...arr];
+      for (let i = a.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [a[i], a[j]] = [a[j], a[i]];
+      }
+      return a;
+    }
+
+    // ---------- render ----------
+    async function renderAll() {
+      const text = $('#text').value.trim();
+      if (!text) return;
+      const candidates = [...document.querySelectorAll('.cand')].map(r => {
+        const [provider, model] = splitEngine(r.querySelector('.eng').value);
+        const sel = r.querySelector('.voice');
+        return {
+          provider, model, voice: sel.value,
+          voiceName: sel.selectedOptions[0]?.textContent || sel.value,
+          pace: parseFloat(r.querySelector('.pace').value) || 1,
+        };
+      }).filter(c => c.voice);
+      if (!candidates.length) return;
+
+      const blind = $('#blind').checked;
+      const order = blind ? shuffle(candidates) : candidates;
+      $('#results').innerHTML = '';
+      $('#reveal').hidden = !blind;
+      $('#render').disabled = true;
+
+      await Promise.all(order.map(async (c, i) => {
+        const engine = { sarvam: 'Sarvam ' + c.model, google: 'Google Chirp3-HD', elevenlabs: 'ElevenLabs' }[c.provider];
+        const real = `${engine} · ${c.voiceName} · pace ${c.pace}`;
+        const card = document.createElement('div');
+        card.className = 'result';
+        card.dataset.real = real;
+        card.innerHTML = `
+          <div class="top">
+            <span class="name">${esc(blind ? 'Sample ' + String.fromCharCode(65 + i) : real)}</span>
+            <span class="stars">${[1, 2, 3, 4, 5].map(n => `<button data-n="${n}">${n}</button>`).join('')}</span>
+          </div>
+          <div class="meta">rendering…</div>
+          <div class="transcript"></div>`;
+        card.querySelectorAll('.stars button').forEach(b => b.onclick = () => {
+          card.dataset.rating = b.dataset.n;
+          card.querySelectorAll('.stars button').forEach(x => x.classList.toggle('on', +x.dataset.n <= +b.dataset.n));
+        });
+        $('#results').appendChild(card);
+
+        const meta = card.querySelector('.meta');
+        try {
+          const r = await api('POST', '/api/voice-lab/tts', {
+            provider: c.provider, model: c.model, voice: c.voice, pace: c.pace,
+            language: $('#lang').value, text,
+          });
+          const audio = document.createElement('audio');
+          audio.controls = true;
+          audio.src = `data:${r.mime};base64,${r.audio_b64}`;
+          card.insertBefore(audio, meta);
+          const details = `render ${r.latency_ms} ms · ${r.chars} chars · ${r.cost_inr == null ? 'cost n/a' : '₹' + r.cost_inr.toFixed(3)}`;
+          card.dataset.details = details;
+          meta.innerHTML = `${esc(blind ? 'ready — listen and rate' : details)}
+            <button class="ghost small wh" style="margin-left:0.4rem">→ Whisper</button>`;
+          meta.querySelector('.wh').onclick = () => transcribe(r.audio_b64, r.mime, card.querySelector('.transcript'));
+        } catch (e) {
+          meta.innerHTML = `<span class="err">${esc(e.message)}</span>`;
+        }
+      }));
+      $('#render').disabled = false;
+    }
+
+    $('#render').onclick = renderAll;
+    $('#reveal').onclick = () => {
+      document.querySelectorAll('#results .result').forEach(card => {
+        const rating = card.dataset.rating ? ` — rated ${card.dataset.rating}/5` : ' — not rated';
+        card.querySelector('.name').textContent = card.dataset.real + rating;
+        const wh = card.querySelector('.meta .wh');
+        if (card.dataset.details && wh) wh.previousSibling.textContent = card.dataset.details + ' ';
+      });
+      $('#reveal').hidden = true;
+    };
+
+    // ---------- Whisper ----------
+    async function transcribe(audioB64, mime, out) {
+      out.textContent = 'transcribing…';
+      try {
+        const r = await api('POST', '/api/voice-lab/stt', {
+          audio_b64: audioB64, mime, model: $('#stt-model').value, language: $('#stt-lang').value,
+        });
+        const noSpeech = r.no_speech_prob == null ? '' : ` · no_speech ${r.no_speech_prob.toFixed(2)}`;
+        out.innerHTML = `<b>${esc(r.text || '(empty)')}</b>
+          <div class="meta">lang ${esc(r.language || '?')} · ${r.duration_s.toFixed(1)} s audio (billed ${r.billed_s.toFixed(0)} s)
+          · ${r.latency_ms} ms · ₹${r.cost_inr.toFixed(4)}${noSpeech}</div>`;
+      } catch (e) {
+        out.innerHTML = `<span class="err">${esc(e.message)}</span>`;
+      }
+    }
+
+    function blobToB64(blob) {
+      return new Promise((resolve, reject) => {
+        const fr = new FileReader();
+        fr.onload = () => resolve(String(fr.result).split(',')[1]);
+        fr.onerror = reject;
+        fr.readAsDataURL(blob);
+      });
+    }
+
+    let recorder = null;
+    $('#rec').onclick = async () => {
+      if (recorder && recorder.state === 'recording') { recorder.stop(); return; }
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      } catch (e) {
+        $('#stt-out').insertAdjacentHTML('afterbegin', `<div class="result err">Mic unavailable: ${esc(e.message)}</div>`);
+        return;
+      }
+      const chunks = [];
+      recorder = new MediaRecorder(stream);
+      recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+      recorder.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop());
+        $('#rec').textContent = '● Record';
+        $('#rec').classList.remove('danger');
+        const blob = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' });
+        const item = document.createElement('div');
+        item.className = 'result';
+        const audio = document.createElement('audio');
+        audio.controls = true;
+        audio.src = URL.createObjectURL(blob);
+        const out = document.createElement('div');
+        out.className = 'transcript';
+        item.append(audio, out);
+        $('#stt-out').prepend(item);
+        transcribe(await blobToB64(blob), blob.type, out);
+      };
+      recorder.start();
+      $('#rec').textContent = '■ Stop';
+      $('#rec').classList.add('danger');
+    };
+
+    // ---------- init ----------
+    (async function init() {
+      try {
+        (await api('GET', '/api/settings')).forEach(s => { cfg[s.key] = s.value; });
+      } catch (e) { /* rates fall back to defaults */ }
+      fillPresets();
+      $('#stt-lang').value = $('#lang').value;
+      addCandidate('google:chirp3-hd', 'Aoede');
+      addCandidate('google:chirp3-hd', 'Achird');
+      addCandidate('sarvam:bulbul:v3', 'priya');
+      addCandidate('elevenlabs:');
+    })();
+  </script>
+</body>
+</html>
